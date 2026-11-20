@@ -16,6 +16,17 @@ from .elexon import GSP_GROUP_NAMES
 EV_TARIFF_SUPPLIERS = {"MERCURY", "NITTWO01", "BRITGAS", "OVOE", "SPSUP01"}
 PRIMARY_EV_LEADERS = {"MERCURY", "NITTWO01", "BRITGAS"}
 
+# Published cheap overnight EV charging windows (Settlement Periods 1-48) per supplier
+SUPPLIER_EV_OFFPEAK_SPS: dict[str, set[int]] = {
+    "MERCURY": set(range(1, 12)) | {48},   # Octopus Go / IOG: 23:30-05:30
+    "NITTWO01": set(range(1, 15)),         # E.ON Next Drive: 00:00-07:00
+    "BRITGAS": set(range(1, 11)),          # British Gas Electric Driver: 00:00-05:00
+    "SPSUP01": set(range(1, 11)),          # ScottishPower EV Optimise: 00:00-05:00
+    "OVOE": set(range(1, 12)) | {48},      # OVO Charge Anytime / overnight proxy
+}
+
+BOUNDARY_SUPPLIERS = ("MERCURY", "NITTWO01", "BRITGAS", "LENCO")
+
 
 def _pearson(xs: list[float], ys: list[float]) -> float | None:
     n = len(xs)
@@ -165,6 +176,18 @@ def compute_forensics(
     vtp_suffix_daily: dict[str, dict[str, dict[str, float]]] = defaultdict(
         lambda: defaultdict(lambda: defaultdict(float))
     )
+    # Tariff-window & profitability accumulators
+    vtp_ev_peak_qcv: dict[str, float] = defaultdict(float)
+    vtp_ev_offpeak_qcv: dict[str, float] = defaultdict(float)
+    vtp_wkday_midday_qcv: dict[str, float] = defaultdict(float)
+    vtp_est_rev_mpj: dict[str, float] = defaultdict(float)
+    vtp_peak_rev_mpj: dict[str, float] = defaultdict(float)
+    vtp_below_ssc_mpj_qcv: dict[str, float] = defaultdict(float)
+    vtp_below_ssc_mpj_rev: dict[str, float] = defaultdict(float)
+    vtp_deadweight_gbp: dict[str, float] = defaultdict(float)
+    vtp_sup_sp_pos: dict[str, dict[str, list[float]]] = defaultdict(
+        lambda: {s: [0.0] * 48 for s in BOUNDARY_SUPPLIERS}
+    )
 
     wkday_count = sum(1 for d in gran_dates if dt.date.fromisoformat(d).weekday() < 5)
     wkend_count = max(0, total_gran_days - wkday_count)
@@ -188,6 +211,8 @@ def compute_forensics(
         qcv = float(row["qcv"] or 0.0)
         cash = float(row["comp_cashflow"] or 0.0)
         abs_qcv = abs(qcv)
+        is_wkday = dt.date.fromisoformat(d).weekday() < 5
+        mkt = sp_market.get((d, sp))
 
         vtp_bmus[sec].add(sec_bmu)
         vtp_comp_cash[sec] += cash
@@ -202,6 +227,23 @@ def compute_forensics(
         if qcv >= 0:
             vtp_pos_qcv[sec] += qcv
             vtp_day_pos[sec][d] += qcv
+            mpj_val = mkt["mpj"] if mkt else 0.0
+            ssc_val = mkt["ssc"] if mkt else 0.0
+            vtp_est_rev_mpj[sec] += qcv * mpj_val
+            if pri in SUPPLIER_EV_OFFPEAK_SPS:
+                if sp in SUPPLIER_EV_OFFPEAK_SPS[pri]:
+                    vtp_ev_offpeak_qcv[sec] += qcv
+                else:
+                    vtp_ev_peak_qcv[sec] += qcv
+                    vtp_peak_rev_mpj[sec] += qcv * mpj_val
+            if is_wkday and 19 <= sp <= 32:
+                vtp_wkday_midday_qcv[sec] += qcv
+            if mkt and mpj_val < ssc_val:
+                vtp_below_ssc_mpj_qcv[sec] += qcv
+                vtp_below_ssc_mpj_rev[sec] += qcv * mpj_val
+                vtp_deadweight_gbp[sec] += qcv * (ssc_val - mpj_val)
+            if pri in BOUNDARY_SUPPLIERS and 1 <= sp <= 48:
+                vtp_sup_sp_pos[sec][pri][sp - 1] += qcv
         else:
             vtp_neg_qcv[sec] += qcv
             vtp_day_neg[sec][d] += qcv
@@ -216,7 +258,7 @@ def compute_forensics(
                 vtp_sp_pos[sec][sp - 1] += qcv
             else:
                 vtp_sp_neg[sec][sp - 1] += qcv
-            if dt.date.fromisoformat(d).weekday() < 5:
+            if is_wkday:
                 vtp_sp_wkday[sec][sp - 1] += qcv
             else:
                 vtp_sp_wkend[sec][sp - 1] += qcv
@@ -517,6 +559,61 @@ def compute_forensics(
             )[:6]
         ]
 
+        # Tariff-window counterfactual & profitability metrics
+        ev_tariff_tot = vtp_ev_peak_qcv[sec] + vtp_ev_offpeak_qcv[sec]
+        peak_tariff_share = (
+            vtp_ev_peak_qcv[sec] / ev_tariff_tot * 100.0 if ev_tariff_tot > 0.01 else 0.0
+        )
+        offpeak_tariff_share = (
+            vtp_ev_offpeak_qcv[sec] / ev_tariff_tot * 100.0 if ev_tariff_tot > 0.01 else 0.0
+        )
+        wkday_midday_share = (
+            vtp_wkday_midday_qcv[sec] / pos_vol * 100.0 if pos_vol > 0.01 else 0.0
+        )
+
+        # Equivalent Full-Load Hours per day: avg(daily_pos_MWh / (daily_peak_sp_MWh * 2))
+        eflh_vals = []
+        for d in gran_dates:
+            sp_vols_d = [
+                max(0.0, day_sp_map.get((d, sp), 0.0)) for sp in range(1, 49)
+            ]
+            peak_sp_d = max(sp_vols_d) if sp_vols_d else 0.0
+            if peak_sp_d > 0.05:
+                eflh_vals.append(sum(sp_vols_d) / (peak_sp_d * 2.0))
+        eflh_hours = sum(eflh_vals) / len(eflh_vals) if eflh_vals else 0.0
+
+        # Supplier-specific tariff clock boundary curves (wrapped 22:00 -> 08:30, SP 45..48 then 1..18)
+        sup_peaks = {
+            s: max(vtp_sup_sp_pos[sec][s]) for s in BOUNDARY_SUPPLIERS
+        }
+        wrapped_sps = [45, 46, 47, 48] + list(range(1, 19))
+        boundary_curves = []
+        for sp_num in wrapped_sps:
+            hh = (sp_num - 1) // 2
+            mm = "00" if (sp_num - 1) % 2 == 0 else "30"
+            pt: dict[str, Any] = {"sp": sp_num, "time": f"{hh:02d}:{mm}"}
+            for s in BOUNDARY_SUPPLIERS:
+                pk = sup_peaks[s]
+                pt[s] = round(vtp_sup_sp_pos[sec][s][sp_num - 1] / pk * 100.0, 1) if pk > 0.05 else 0.0
+            boundary_curves.append(pt)
+
+        # Detect supplier-specific tariff clock steps (e.g. BG jumps at 05:00 ahead of Octopus at 05:30;
+        # Octopus drops at 23:30 ahead of E.ON Next at 00:00)
+        def _norm(sup: str, sp_num: int) -> float:
+            pk = sup_peaks[sup]
+            return (vtp_sup_sp_pos[sec][sup][sp_num - 1] / pk * 100.0) if pk > 0.05 else 0.0
+
+        bg_0500_lead = _norm("BRITGAS", 11) - _norm("MERCURY", 11)
+        oct_0530_lead = _norm("MERCURY", 12) - _norm("NITTWO01", 12)
+        oct_2330_drop = _norm("NITTWO01", 48) - _norm("MERCURY", 48)
+        edf_2300_drop = _norm("NITTWO01", 47) - _norm("LENCO", 47)
+        has_clock_fingerprint = bool(
+            sup_peaks["MERCURY"] > 1.0
+            and sup_peaks["NITTWO01"] > 0.5
+            and (bg_0500_lead >= 12.0 or oct_0530_lead >= 8.0)
+            and oct_2330_drop >= 15.0
+        )
+
         vtp_results.append(
             {
                 "party_id": sec,
@@ -538,6 +635,31 @@ def compute_forensics(
                 "baselining_risk_score": round(baselining_risk_score, 1),
                 "archetype": archetype,
                 "evidence": evidence,
+                "tariff_analysis": {
+                    "peak_tariff_share_pct": round(peak_tariff_share, 1),
+                    "offpeak_tariff_share_pct": round(offpeak_tariff_share, 1),
+                    "weekday_midday_share_pct": round(wkday_midday_share, 1),
+                    "eflh_hours_per_day": round(eflh_hours, 1),
+                    "estimated_vtp_revenue_gbp": round(vtp_est_rev_mpj[sec], 2),
+                    "peak_tariff_revenue_gbp": round(vtp_peak_rev_mpj[sec], 2),
+                    "below_ssc_mpj_qcv_mwh": round(vtp_below_ssc_mpj_qcv[sec], 2),
+                    "below_ssc_vtp_revenue_gbp": round(vtp_below_ssc_mpj_rev[sec], 2),
+                    "deadweight_subsidy_gbp": round(vtp_deadweight_gbp[sec], 2),
+                    "has_tariff_clock_fingerprint": has_clock_fingerprint,
+                    "clock_steps": {
+                        "bg_0500_pct": round(_norm("BRITGAS", 11), 1),
+                        "oct_0500_pct": round(_norm("MERCURY", 11), 1),
+                        "oct_0530_pct": round(_norm("MERCURY", 12), 1),
+                        "eon_0530_pct": round(_norm("NITTWO01", 12), 1),
+                        "eon_0600_pct": round(_norm("NITTWO01", 13), 1),
+                        "edf_2300_pct": round(_norm("LENCO", 47), 1),
+                        "oct_2330_pct": round(_norm("MERCURY", 48), 1),
+                        "eon_2330_pct": round(_norm("NITTWO01", 48), 1),
+                        "eon_0000_pct": round(_norm("NITTWO01", 1), 1),
+                        "edf_2300_drop_gap": round(edf_2300_drop, 1),
+                    },
+                    "boundary_curves": boundary_curves,
+                },
                 "signals": {
                     "ev_affinity_score": round(ev_affinity_score, 1),
                     "ev_supplier_share_pct": round(ev_sup_share * 100.0, 1),
@@ -594,6 +716,10 @@ def compute_forensics(
         if abs(market_total_comp) > 1
         else 0.0
     )
+    tot_est_rev = sum(v["tariff_analysis"]["estimated_vtp_revenue_gbp"] for v in vtp_results)
+    tot_peak_rev = sum(v["tariff_analysis"]["peak_tariff_revenue_gbp"] for v in vtp_results)
+    tot_below_ssc_rev = sum(v["tariff_analysis"]["below_ssc_vtp_revenue_gbp"] for v in vtp_results)
+    tot_deadweight = sum(v["tariff_analysis"]["deadweight_subsidy_gbp"] for v in vtp_results)
 
     return {
         "start_date": start_date,
@@ -610,6 +736,10 @@ def compute_forensics(
             "ev_focused_share_pct": round(high_ev_share, 1),
             "ev_baselining_high_risk_gbp": round(high_ev_high_risk_cash, 2),
             "ev_baselining_high_risk_share_pct": round(high_ev_high_risk_share, 1),
+            "total_estimated_vtp_revenue_gbp": round(tot_est_rev, 2),
+            "total_peak_tariff_revenue_gbp": round(tot_peak_rev, 2),
+            "total_below_ssc_vtp_revenue_gbp": round(tot_below_ssc_rev, 2),
+            "total_deadweight_subsidy_gbp": round(tot_deadweight, 2),
             "headline": (
                 f"{high_ev_share:.1f}% of VTP supplier compensation is driven by EV-focused "
                 f"domestic aggregators, and {high_ev_high_risk_share:.1f}% shows strong "

@@ -203,6 +203,38 @@ export interface ForensicVtp {
   baselining_risk_score: number;
   archetype: string;
   evidence: string[];
+  tariff_analysis: {
+    peak_tariff_share_pct: number;
+    offpeak_tariff_share_pct: number;
+    weekday_midday_share_pct: number;
+    eflh_hours_per_day: number;
+    estimated_vtp_revenue_gbp: number;
+    peak_tariff_revenue_gbp: number;
+    below_ssc_mpj_qcv_mwh: number;
+    below_ssc_vtp_revenue_gbp: number;
+    deadweight_subsidy_gbp: number;
+    has_tariff_clock_fingerprint: boolean;
+    clock_steps: {
+      bg_0500_pct: number;
+      oct_0500_pct: number;
+      oct_0530_pct: number;
+      eon_0530_pct: number;
+      eon_0600_pct: number;
+      edf_2300_pct: number;
+      oct_2330_pct: number;
+      eon_2330_pct: number;
+      eon_0000_pct: number;
+      edf_2300_drop_gap: number;
+    };
+    boundary_curves: {
+      sp: number;
+      time: string;
+      MERCURY: number;
+      NITTWO01: number;
+      BRITGAS: number;
+      LENCO: number;
+    }[];
+  };
   signals: {
     ev_affinity_score: number;
     ev_supplier_share_pct: number;
@@ -286,6 +318,10 @@ export interface ForensicsResponse {
     ev_focused_share_pct: number;
     ev_baselining_high_risk_gbp: number;
     ev_baselining_high_risk_share_pct: number;
+    total_estimated_vtp_revenue_gbp: number;
+    total_peak_tariff_revenue_gbp: number;
+    total_below_ssc_vtp_revenue_gbp: number;
+    total_deadweight_subsidy_gbp: number;
     headline: string;
   };
   vtps: ForensicVtp[];

@@ -167,10 +167,15 @@ def test_forensics_distinguishes_ev_baselining_from_commercial(tmp_path: Path) -
     assert axle["signals"]["one_sided_ratio_pct"] == 100.0
     assert axle["signals"]["pct_below_ssc"] == 50.0
     assert axle["signals"]["gsp_count"] == 14
+    assert axle["tariff_analysis"]["peak_tariff_share_pct"] == 100.0
+    assert axle["tariff_analysis"]["eflh_hours_per_day"] == 17.0
+    assert axle["tariff_analysis"]["deadweight_subsidy_gbp"] > 0
+    assert len(axle["tariff_analysis"]["boundary_curves"]) == 22
 
     assert zeno["ev_focus_score"] < 30
     assert zeno["baselining_risk_score"] < axle["baselining_risk_score"] - 35
     assert zeno["signals"]["pct_below_ssc"] == 0.0
+    assert zeno["tariff_analysis"]["deadweight_subsidy_gbp"] == 0.0
 
 
 def test_api_endpoints_end_to_end(tmp_path: Path, monkeypatch) -> None:

@@ -458,6 +458,285 @@ export function ForensicsView({ data, initialVtpId }: Props) {
                 </ul>
               </div>
 
+              {/* NEW: Tariff-Window Counterfactual & Profitability Strip */}
+              <div
+                style={{
+                  border: '1px solid var(--border)',
+                  borderRadius: 3,
+                  marginBottom: 20,
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  style={{
+                    padding: '11px 16px',
+                    background: 'var(--bg-subtle)',
+                    borderBottom: '1px solid var(--border)',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: 10,
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <div>
+                    <span style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--ink)' }}>
+                      Tariff-window counterfactual &amp; profitability test
+                    </span>
+                    <InfoTip
+                      title="Testing whether EVs are profiting when they wouldn't normally charge"
+                      text="UK EV tariffs charge ~7p/kWh overnight (Octopus 23:30–05:30, E.ON Next 00:00–07:00, British Gas & ScottishPower 00:00–05:00) vs ~25–28p/kWh during daytime/evening. Customers on these tariffs almost never charge EVs during 26p daytime hours. Claiming turn-down across 95–98% peak-tariff hours (and 12+ full-load hours/day) indicates baselines that do not reflect true EV-tariff charging."
+                      align="left"
+                    />
+                  </div>
+                  {selected.tariff_analysis.has_tariff_clock_fingerprint ? (
+                    <span className="badge badge-vermilion">
+                      Supplier tariff-clock fingerprint detected
+                      <InfoTip
+                        title="What this fingerprint proves"
+                        text="This VTP's volume jumps up at the exact half-hour each individual supplier's cheap EV rate ENDS (05:00 British Gas, 05:30 Octopus, 06:00 E.ON Next) and drops at the exact half-hour each supplier's cheap rate STARTS (23:00 EDF, 23:30 Octopus, 00:00 E.ON). That proves the underlying meters are on those EV tariffs — and that their routine off-peak scheduling is generating all-day turn-down claims against a daytime baseline."
+                        align="right"
+                      />
+                    </span>
+                  ) : selected.tariff_analysis.offpeak_tariff_share_pct >= 80 ? (
+                    <span className="badge badge-teal">
+                      Off-peak benchmark: trades inside cheap EV window
+                    </span>
+                  ) : (
+                    <span className="badge badge-neutral">
+                      Uniform / non-tariff-clock schedule
+                    </span>
+                  )}
+                </div>
+
+                <div className="ledger-strip" style={{ marginBottom: 0, border: 'none' }}>
+                  <div className="ledger-cell">
+                    <div className="ledger-label">
+                      Claimed in expensive tariff hours
+                      <InfoTip
+                        title="Peak-tariff share (%)"
+                        text="Share of this VTP's positive turn-down on the 5 major EV-tariff suppliers that occurs OUTSIDE each supplier's published cheap overnight window (i.e. during 25–28p/kWh hours when EV-tariff cars would not normally be charging). Compare ~97% (Axle/Reflexi/Joulen) against 0.1% (Capture Energy, which shifts charging inside the 00:00–02:30 cheap window)."
+                        align="left"
+                      />
+                    </div>
+                    <div
+                      className={`ledger-value ${
+                        selected.tariff_analysis.peak_tariff_share_pct >= 85
+                          ? 'vermilion'
+                          : 'teal'
+                      }`}
+                    >
+                      {selected.tariff_analysis.peak_tariff_share_pct.toFixed(1)}%
+                    </div>
+                    <div className="ledger-sub">
+                      Only {selected.tariff_analysis.offpeak_tariff_share_pct.toFixed(1)}% inside
+                      cheap overnight EV windows
+                    </div>
+                  </div>
+
+                  <div className="ledger-cell">
+                    <div className="ledger-label">
+                      Weekday midday (09:00–16:00)
+                      <InfoTip
+                        title="Working-day daytime turn-down share"
+                        text="% of total turn-down volume claimed between 09:00 and 16:00 Mon–Fri (SP 19–32). At midday on weekdays, EV-tariff rates are 3.5–4× overnight rates AND commuter cars are typically away from home — making large continuous midday 'avoided EV charging' strongly indicative of inflated daytime baselines."
+                        align="center"
+                      />
+                    </div>
+                    <div
+                      className={`ledger-value ${
+                        selected.tariff_analysis.weekday_midday_share_pct >= 15
+                          ? 'vermilion'
+                          : ''
+                      }`}
+                    >
+                      {selected.tariff_analysis.weekday_midday_share_pct.toFixed(1)}%
+                    </div>
+                    <div className="ledger-sub">
+                      Mon–Fri 09:00–16:00 (26p/kWh &amp; work hours)
+                    </div>
+                  </div>
+
+                  <div className="ledger-cell">
+                    <div className="ledger-label">
+                      Equivalent full-load hours
+                      <InfoTip
+                        title="Equivalent Full-Load Hours (EFLH = Daily MWh ÷ Peak MW)"
+                        text="Measures how many hours per day the fleet would need to run at its full daily peak MW to deliver the claimed daily turn-down MWh. A typical UK EV drives ~20–25 miles/day (~7 kWh = ~1–1.5 hrs on a 7 kW charger). Claiming 11–13 full-load hours EVERY day is physically inconsistent with genuine paused EV charging."
+                        align="center"
+                      />
+                    </div>
+                    <div
+                      className={`ledger-value ${
+                        selected.tariff_analysis.eflh_hours_per_day >= 8 ? 'vermilion' : ''
+                      }`}
+                    >
+                      {selected.tariff_analysis.eflh_hours_per_day.toFixed(1)} h/d
+                    </div>
+                    <div className="ledger-sub">
+                      Typical UK EV daily charge: ~1–2 h/d at 7 kW
+                    </div>
+                  </div>
+
+                  <div className="ledger-cell">
+                    <div className="ledger-label">
+                      Est. VTP wholesale value (MIDP)
+                      <InfoTip
+                        title="Estimated gross wholesale revenue & below-SSC deadweight"
+                        text="Calculated as sum(qcv × mpj) using Elexon's Market Index Price (MIDP) as a proxy for wholesale value earned on positive turn-down. Below-SSC revenue is earned in SPs where MIDP < £106.47/MWh SSC: the VTP still profits (paying £0 SSC under mutualisation), while GB billpayers suffer a net deadweight loss of sum(qcv × (SSC − MIDP))."
+                        align="right"
+                      />
+                    </div>
+                    <div className="ledger-value teal">
+                      {fmtGbp(selected.tariff_analysis.estimated_vtp_revenue_gbp, true)}
+                    </div>
+                    <div className="ledger-sub">
+                      {fmtGbp(selected.tariff_analysis.below_ssc_vtp_revenue_gbp, true)} earned when
+                      MIDP &lt; SSC ({fmtGbp(selected.tariff_analysis.deadweight_subsidy_gbp, true)}{' '}
+                      deadweight)
+                    </div>
+                  </div>
+                </div>
+
+                {/* Supplier-Specific Tariff Clock Boundary Overlay Chart */}
+                <div style={{ padding: '14px 16px', borderTop: '1px solid var(--border)' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'baseline',
+                      gap: 12,
+                      flexWrap: 'wrap',
+                      marginBottom: 4,
+                    }}
+                  >
+                    <h4 className="panel-title" style={{ fontSize: 13.5 }}>
+                      Supplier tariff-clock boundary proof (22:00 → 08:30, % of each supplier’s peak)
+                      <InfoTip
+                        title="Why we normalize each supplier to 0–100% of its own peak"
+                        text="Because Octopus has far more EVs than EDF or British Gas, plotting raw MWh hides smaller suppliers. Normalizing each supplier's curve to 0–100% of its own daily peak lets you compare the EXACT minute turn-down drops at night and surges in the morning. If curves step at different half-hours matching each supplier's tariff clock (EDF 23:00, Octopus 23:30/05:30, E.ON 00:00/06:00, British Gas 05:00), it proves the meters follow EV tariff clocks — while claiming turn-down across the expensive hours outside those clocks."
+                        align="left"
+                      />
+                    </h4>
+                    {selected.tariff_analysis.has_tariff_clock_fingerprint && (
+                      <span className="mono" style={{ fontSize: 11.5, color: 'var(--vermilion)' }}>
+                        05:00 BG {selected.tariff_analysis.clock_steps.bg_0500_pct}% vs Oct{' '}
+                        {selected.tariff_analysis.clock_steps.oct_0500_pct}% · 05:30 Oct{' '}
+                        {selected.tariff_analysis.clock_steps.oct_0530_pct}% vs E.ON{' '}
+                        {selected.tariff_analysis.clock_steps.eon_0530_pct}% · 23:30 Oct{' '}
+                        {selected.tariff_analysis.clock_steps.oct_2330_pct}% vs E.ON{' '}
+                        {selected.tariff_analysis.clock_steps.eon_2330_pct}%
+                      </span>
+                    )}
+                  </div>
+                  <p className="panel-subtitle" style={{ marginBottom: 10 }}>
+                    Watch each supplier’s curve drop when its own cheap EV tariff starts (EDF 23:00,
+                    Octopus 23:30, E.ON 00:00) and surge the exact half-hour its cheap rate ends
+                    (British Gas 05:00, Octopus 05:30, E.ON 06:00).
+                  </p>
+                  <div style={{ width: '100%', height: 245 }}>
+                    <ResponsiveContainer>
+                      <LineChart
+                        data={selected.tariff_analysis.boundary_curves}
+                        margin={{ top: 14, right: 16, left: 0, bottom: 4 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e6ecf2" />
+                        <XAxis dataKey="time" tick={{ fontSize: 11, fill: '#6c7e91' }} interval={1} />
+                        <YAxis
+                          domain={[0, 100]}
+                          tickFormatter={(v: number) => `${v}%`}
+                          tick={{ fontSize: 11, fill: '#6c7e91' }}
+                          width={44}
+                        />
+                        <ReferenceLine
+                          x="23:00"
+                          stroke="#c47a0e"
+                          strokeDasharray="3 3"
+                          label={{ value: 'EDF 23:00', position: 'top', fontSize: 9.5, fill: '#c47a0e' }}
+                        />
+                        <ReferenceLine
+                          x="23:30"
+                          stroke="#2b59c3"
+                          strokeDasharray="3 3"
+                          label={{ value: 'Oct 23:30', position: 'insideTopRight', fontSize: 9.5, fill: '#2b59c3' }}
+                        />
+                        <ReferenceLine
+                          x="00:00"
+                          stroke="#c84b31"
+                          strokeDasharray="3 3"
+                          label={{ value: 'E.ON 00:00', position: 'insideTopRight', fontSize: 9.5, fill: '#c84b31' }}
+                        />
+                        <ReferenceLine
+                          x="05:00"
+                          stroke="#006b6b"
+                          strokeDasharray="3 3"
+                          label={{ value: 'BG 05:00', position: 'top', fontSize: 9.5, fill: '#006b6b' }}
+                        />
+                        <ReferenceLine
+                          x="05:30"
+                          stroke="#2b59c3"
+                          strokeDasharray="3 3"
+                          label={{ value: 'Oct 05:30', position: 'insideTopRight', fontSize: 9.5, fill: '#2b59c3' }}
+                        />
+                        <ReferenceLine
+                          x="06:00"
+                          stroke="#c84b31"
+                          strokeDasharray="3 3"
+                          label={{ value: 'E.ON 06:00', position: 'insideTopRight', fontSize: 9.5, fill: '#c84b31' }}
+                        />
+                        <Tooltip
+                          formatter={(val: number, name: string) => [`${val}% of peak SP`, name]}
+                          labelFormatter={(label: string) => `Settlement period start: ${label}`}
+                          contentStyle={{
+                            border: '1px solid #bcc7d5',
+                            borderRadius: 3,
+                            fontSize: 12,
+                          }}
+                        />
+                        <Legend wrapperStyle={{ fontSize: 11.5 }} />
+                        <Line
+                          type="monotone"
+                          dataKey="MERCURY"
+                          name="Octopus (IOG/Go 23:30–05:30)"
+                          stroke="#2b59c3"
+                          strokeWidth={2.2}
+                          dot={{ r: 2 }}
+                          isAnimationActive={false}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="NITTWO01"
+                          name="E.ON Next (Drive 00:00–06/07)"
+                          stroke="#c84b31"
+                          strokeWidth={2.2}
+                          dot={{ r: 2 }}
+                          isAnimationActive={false}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="BRITGAS"
+                          name="British Gas (ED 00:00–05:00)"
+                          stroke="#006b6b"
+                          strokeWidth={2.2}
+                          dot={{ r: 2 }}
+                          isAnimationActive={false}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="LENCO"
+                          name="EDF (GoElectric 23:00–05:00)"
+                          stroke="#c47a0e"
+                          strokeWidth={1.8}
+                          strokeDasharray="4 2"
+                          dot={{ r: 2 }}
+                          isAnimationActive={false}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
+
               {/* 6-Signal Breakdown + Low-Price Farming Scatter */}
               <div className="grid-2">
                 <div>
@@ -830,6 +1109,216 @@ export function ForensicsView({ data, initialVtpId }: Props) {
                   <strong>-7.18 to -7.81 MWh</strong> baseline (real overnight EV charging rebound)
                   with <span className="mono">wmi2j = 0</span> so zero negative compensation is
                   booked.
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Cross-VTP Tariff-Window & Profitability Comparison Table */}
+          <section className="panel">
+            <div className="panel-header">
+              <div>
+                <h3 className="panel-title">
+                  Cross-VTP tariff-window &amp; profitability comparison
+                  <InfoTip
+                    title="Compare continuous peak harvesters against the Capture control benchmark"
+                    text="Compare Axle Energy (97.6% peak-tariff, 28.2% weekday midday, 12.8 h/d EFLH, tariff-clock match) and Powerverse (95.1% peak, 11.7 h/d) against Capture Energy (0.1% peak-tariff, 1.9 h/d EFLH — pausing EVs inside Octopus's cheap 00:00–02:30 window). Click any row to load its full dossier above."
+                    align="left"
+                  />
+                </h3>
+                <p className="panel-subtitle">
+                  Estimated wholesale revenue uses Elexon MIDP (<span className="mono">mpj</span>)
+                  as a transparent proxy; click any row to inspect its supplier tariff-clock curves.
+                </p>
+              </div>
+              <span className="badge badge-neutral">
+                Window total est. VTP wholesale value:{' '}
+                {fmtGbp(data.market_verdict.total_estimated_vtp_revenue_gbp, true)} · Deadweight:{' '}
+                {fmtGbp(data.market_verdict.total_deadweight_subsidy_gbp, true)}
+              </span>
+            </div>
+            <div className="table-scroll">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>VTP</th>
+                    <th className="num">
+                      Peak-tariff %
+                      <InfoTip
+                        title="Share in expensive EV-tariff hours"
+                        text="% of positive turn-down on EV-tariff suppliers occurring OUTSIDE each supplier's cheap overnight window (Octopus 23:30–05:30, E.ON 00:00–07:00, BG/SP 00:00–05:00)."
+                        align="right"
+                        direction="bottom"
+                      />
+                    </th>
+                    <th className="num">
+                      Wkday 09–16
+                      <InfoTip
+                        title="Weekday midday share (Mon–Fri 09:00–16:00)"
+                        text="% of total turn-down claimed during Mon–Fri office hours (SP 19–32) when commuter EVs are typically away and daytime tariff rates are 3.5–4× overnight rates."
+                        align="right"
+                        direction="bottom"
+                      />
+                    </th>
+                    <th className="num">
+                      EFLH
+                      <InfoTip
+                        title="Equivalent Full-Load Hours (h/day)"
+                        text="Daily turn-down MWh divided by daily peak MW. A typical UK EV needs ~1–2 h/d of 7 kW charging; 11–13 h/d implies continuous daytime baseline harvesting."
+                        align="right"
+                        direction="bottom"
+                      />
+                    </th>
+                    <th className="num">
+                      Est. VTP Rev
+                      <InfoTip
+                        title="Estimated VTP wholesale value (Σ qcv × mpj)"
+                        text="Gross wholesale revenue proxy computed by multiplying each half-hour's positive qcv by Elexon's Market Index Price (MIDP). Under P415 mutualisation, the VTP does not pay SSC."
+                        align="right"
+                        direction="bottom"
+                      />
+                    </th>
+                    <th className="num">
+                      Rev &lt; SSC
+                      <InfoTip
+                        title="VTP revenue when MIDP < SSC"
+                        text="Revenue earned by the VTP during half-hours where wholesale power cost LESS than £106.47/MWh Supplier Sourcing Cost (i.e. turning down demand had negative system value)."
+                        align="right"
+                        direction="bottom"
+                      />
+                    </th>
+                    <th className="num">
+                      Deadweight
+                      <InfoTip
+                        title="Net billpayer deadweight subsidy"
+                        text="Σ qcv × (SSC − MIDP) across all SPs where MIDP < SSC: the net pounds paid out of the mutualised supplier pot above the wholesale energy value saved."
+                        align="right"
+                        direction="bottom"
+                      />
+                    </th>
+                    <th>Tariff clock</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.vtps.map((v) => {
+                    const ta = v.tariff_analysis;
+                    return (
+                      <tr
+                        key={`ta-${v.party_id}`}
+                        className={`clickable ${selected?.party_id === v.party_id ? 'selected' : ''}`}
+                        onClick={() => setSelectedId(v.party_id)}
+                      >
+                        <td>
+                          <div style={{ fontWeight: 600 }}>{v.company_name}</div>
+                          <div className="mono" style={{ fontSize: 11, color: 'var(--ink-muted)' }}>
+                            {v.party_id}
+                          </div>
+                        </td>
+                        <td className="num">
+                          <span
+                            className={`badge ${
+                              ta.peak_tariff_share_pct >= 85
+                                ? 'badge-vermilion'
+                                : ta.peak_tariff_share_pct <= 10
+                                  ? 'badge-teal'
+                                  : 'badge-neutral'
+                            }`}
+                          >
+                            {ta.peak_tariff_share_pct.toFixed(1)}%
+                          </span>
+                        </td>
+                        <td className="num">{ta.weekday_midday_share_pct.toFixed(1)}%</td>
+                        <td className="num">{ta.eflh_hours_per_day.toFixed(1)} h/d</td>
+                        <td className="num" style={{ fontWeight: 600 }}>
+                          {fmtGbp(ta.estimated_vtp_revenue_gbp, true)}
+                        </td>
+                        <td className="num">{fmtGbp(ta.below_ssc_vtp_revenue_gbp, true)}</td>
+                        <td
+                          className="num"
+                          style={{
+                            color: ta.deadweight_subsidy_gbp > 5000 ? 'var(--vermilion)' : undefined,
+                            fontWeight: ta.deadweight_subsidy_gbp > 5000 ? 600 : 400,
+                          }}
+                        >
+                          {fmtGbp(ta.deadweight_subsidy_gbp, true)}
+                        </td>
+                        <td>
+                          {ta.has_tariff_clock_fingerprint ? (
+                            <span className="badge badge-vermilion">Clock match</span>
+                          ) : ta.offpeak_tariff_share_pct >= 80 ? (
+                            <span className="badge badge-teal">Off-peak only</span>
+                          ) : (
+                            <span className="badge badge-neutral">Uniform</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {/* Detailed Methodology, Formulas & Reasoning Reference Panel */}
+          <section className="panel">
+            <div className="panel-header">
+              <div>
+                <h3 className="panel-title">
+                  Methodology, economic reasoning &amp; analytical caveats
+                </h3>
+                <p className="panel-subtitle">
+                  Step-by-step explanation of how these settlement tests establish whether EV
+                  optimisers are profiting from unrepresentative daytime baselines.
+                </p>
+              </div>
+            </div>
+            <div className="panel-body">
+              <div className="guide-grid" style={{ padding: 0 }}>
+                <div>
+                  <strong>1. The EV-tariff counterfactual paradox</strong>
+                  UK EV tariffs create a ~3.5–4× overnight discount: Octopus Go/IOG (~7p vs ~26p,
+                  23:30–05:30), E.ON Next Drive (~6.7p vs ~25p, 00:00–07:00), British Gas Electric
+                  Driver (~7.9p vs ~26p, 00:00–05:00), and EDF GoElectric (23:00–05:00/06:00). A
+                  rational driver on these tariffs schedules EV charging overnight and does{' '}
+                  <em>not</em> charge continuously from 05:30 to 23:30. Yet if a VTP’s baseline
+                  assumes daytime/evening charging (via frozen BL01 non-event days or a flat
+                  self-nominated SEV), routine tariff-driven non-charging looks like “demand
+                  turn-down” all day long.
+                </div>
+                <div>
+                  <strong>2. Why supplier tariff-clock jumps are decisive</strong>
+                  When we plot each supplier’s turn-down curve separately on a 0–100% peak scale,
+                  Axle Energy and Powerverse jump sharply at <strong>05:00 for British Gas</strong>,{' '}
+                  <strong>05:30 for Octopus</strong>, and <strong>06:00 for E.ON Next</strong> — and
+                  collapse at <strong>23:00 for EDF</strong>, <strong>23:30 for Octopus</strong>,
+                  and <strong>00:00 for E.ON Next</strong>. Those supplier-specific half-hour steps
+                  prove two things simultaneously: (a) the meters really are EV-tariff households,
+                  and (b) the moment each tariff switches from cheap to expensive (causing chargers
+                  to stop automatically), the VTP books massive “flexibility” turn-down against its
+                  baseline.
+                </div>
+                <div>
+                  <strong>3. Why VTPs profit even on cheap windy days</strong>
+                  Under P415 mutualisation, the VTP does not pay the £106.47/MWh Supplier Sourcing
+                  Cost (<span className="mono">ssc</span>); all GB suppliers pay it via{' '}
+                  <span className="mono">scvp</span>. Example: on a windy £49/MWh day, turning down
+                  an EV that wasn’t going to charge anyway costs the VTP £0 and earns ~£49/MWh on
+                  the wholesale market, while forcing GB billpayers to pay £106.47/MWh in supplier
+                  compensation — a £57.47/MWh net deadweight loss. Genuine flexibility only
+                  dispatches when wholesale value exceeds the true cost of shifting load.
+                </div>
+                <div>
+                  <strong>4. Exact formulas &amp; honest caveats</strong>
+                  <span className="mono">Est. VTP Rev = Σ(qcv × mpj)</span> (MIDP proxy; actual
+                  bilateral/EPEX trade prices may differ slightly).{' '}
+                  <span className="mono">Deadweight = Σ(qcv × (ssc − mpj))</span> where{' '}
+                  <span className="mono">mpj &lt; ssc</span>.{' '}
+                  <span className="mono">EFLH = avg(daily MWh ÷ daily peak MW)</span>. Caveats:
+                  (1) Portfolios may mix EV chargers with home batteries/heat pumps (which can
+                  legitimately discharge during daytime/evening, though batteries still require
+                  matching overnight recharge rebound); (2) a minority of EV owners remain on
+                  flat-rate standard variable tariffs; (3) exact individual-MPAN baselines are not
+                  published in Elexon data.
                 </div>
               </div>
             </div>
