@@ -165,13 +165,14 @@ export function OverviewView({ data, onNavigate }: Props) {
                   <ReferenceLine
                     key={m.code}
                     x={m.xDate}
-                    stroke="#c84b31"
+                    stroke="#d1432a"
                     strokeDasharray="4 3"
                     label={{
                       value: `${m.code} (${m.date.slice(0, 7)})`,
-                      position: m.code === 'P415' ? 'insideTopRight' : 'insideTopLeft',
-                      dx: m.code === 'P415' ? 6 : -6,
-                      fill: '#c84b31',
+                      position: m.code === 'P415' ? 'insideTopLeft' : 'insideTopRight',
+                      dx: m.code === 'P415' ? 8 : -8,
+                      dy: 6,
+                      fill: '#d1432a',
                       fontSize: 11,
                       fontWeight: 600,
                     }}
@@ -261,7 +262,17 @@ export function OverviewView({ data, onNavigate }: Props) {
                     <td className="num" style={{ fontWeight: 600 }}>
                       {fmtGbp(v.comp_gbp)}
                     </td>
-                    <td className="num">{v.share_pct.toFixed(1)}%</td>
+                    <td className="num">
+                      <span className="share-bar-cell">
+                        <span className="share-bar-track" aria-hidden="true">
+                          <span
+                            className="share-bar-fill"
+                            style={{ width: `${Math.min(100, Math.max(2, v.share_pct))}%` }}
+                          />
+                        </span>
+                        <span>{v.share_pct.toFixed(1)}%</span>
+                      </span>
+                    </td>
                   </tr>
                 ))}
               </tbody>

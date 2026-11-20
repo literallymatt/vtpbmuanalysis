@@ -13,11 +13,14 @@ interface Props {
   status: StatusResponse | null;
 }
 
-const NAV_ITEMS: { id: TabId; label: string; icon: typeof Activity }[] = [
+const ANALYSIS_NAV: { id: TabId; label: string; icon: typeof Activity }[] = [
   { id: 'overview', label: 'Settlement overview', icon: Activity },
   { id: 'timing', label: 'When VTPs trade', icon: Clock },
   { id: 'compensation', label: 'Supplier compensation', icon: ArrowLeftRight },
   { id: 'forensics', label: 'EV baselining lab', icon: ShieldAlert },
+];
+
+const DATA_NAV: { id: TabId; label: string; icon: typeof Activity }[] = [
   { id: 'explorer', label: 'BMU & party explorer', icon: Table2 },
 ];
 
@@ -25,14 +28,31 @@ export function Sidebar({ activeTab, onSelectTab, status }: Props) {
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
-        <h1 className="sidebar-brand-title">GB VTP Forensics</h1>
+        <div className="sidebar-brand-mark">
+          <span className="brand-dot" aria-hidden="true" />
+          <h1 className="sidebar-brand-title">GB VTP Forensics</h1>
+        </div>
         <p className="sidebar-brand-sub">
-          Elexon SAA-I014 settlement ledger and P415 compensation analytics
+          Elexon SAA-I014 settlement ledger and P415 market analytics
         </p>
       </div>
 
       <nav className="sidebar-nav" aria-label="Primary navigation">
-        {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
+        <div className="nav-section-label">Analysis</div>
+        {ANALYSIS_NAV.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            className={`nav-item ${activeTab === id ? 'active' : ''}`}
+            onClick={() => onSelectTab(id)}
+          >
+            <Icon size={16} strokeWidth={2} />
+            <span>{label}</span>
+          </button>
+        ))}
+
+        <div className="nav-section-label">Data &amp; Registry</div>
+        {DATA_NAV.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             type="button"
