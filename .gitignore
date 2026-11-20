@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# Local SQLite database (ingested live from Elexon APIs)
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/*.sqlite*
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# OS / IDE
+.DS_Store
+.env
+*.log

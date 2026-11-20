@@ -1,0 +1,21 @@
+[project]
+name = "vtpbmuanalysis"
+version = "0.1.0"
+description = "Forensic analytics for GB Virtual Trading Party (VTP / P415) activities, supplier compensation flows, and EV baselining behaviour using Elexon SAA-I014 settlement data."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
