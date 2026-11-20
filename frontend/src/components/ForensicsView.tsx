@@ -668,7 +668,7 @@ export function ForensicsView({ data, initialVtpId }: Props) {
                     <Line
                       type="monotone"
                       dataKey="NITTWO01"
-                      name="E.ON Next (Drive 00:00–06/07)"
+                      name="E.ON Next (Drive 00:00–06:00)"
                       stroke="#d1432a"
                       strokeWidth={2.2}
                       dot={{ r: 2 }}
@@ -686,7 +686,7 @@ export function ForensicsView({ data, initialVtpId }: Props) {
                     <Line
                       type="monotone"
                       dataKey="LENCO"
-                      name="EDF (GoElectric 23:00–05:00)"
+                      name="EDF (GoElectric 23:00–06:00)"
                       stroke="#c97a12"
                       strokeWidth={1.8}
                       strokeDasharray="4 2"
@@ -1065,7 +1065,7 @@ export function ForensicsView({ data, initialVtpId }: Props) {
                       Peak-tariff %
                       <InfoTip
                         title="Share in expensive EV-tariff hours"
-                        text="% of positive turn-down on EV-tariff suppliers occurring OUTSIDE each supplier's cheap overnight window (Octopus 23:30–05:30, E.ON 00:00–07:00, BG/SP 00:00–05:00)."
+                        text="% of positive turn-down on EV-tariff suppliers occurring OUTSIDE each supplier's published cheap overnight window (Octopus IOG 23:30–05:30, E.ON Next Drive 00:00–06:00, British Gas / ScottishPower 00:00–05:00)."
                       />
                     </th>
                     <th className="num">
@@ -1240,9 +1240,10 @@ export function ForensicsView({ data, initialVtpId }: Props) {
               <div className="guide-grid no-border">
                 <div>
                   <strong>The EV-tariff counterfactual paradox</strong>
-                  UK EV tariffs create a ~3.5–4× overnight discount: Octopus Go/IOG (~7p vs ~26p,
-                  23:30–05:30), E.ON Next Drive (~6.7p vs ~25p, 00:00–07:00), British Gas Electric
-                  Driver (~7.9p vs ~26p, 00:00–05:00), and EDF GoElectric (23:00–05:00/06:00). A
+                  UK EV tariffs create a ~3.5–4× overnight discount: Intelligent Octopus Go (~7p vs
+                  ~26p, 23:30–05:30; Octopus Go 00:30–05:30), E.ON Next Drive (~6.7p vs ~25p,
+                  00:00–06:00), British Gas Electric Driver (~7.9p vs ~26p, 00:00–05:00), and EDF
+                  GoElectric (23:00–06:00). A
                   rational driver on these tariffs schedules EV charging overnight and does{' '}
                   <em>not</em> charge continuously from 05:30 to 23:30. Yet if a VTP’s baseline
                   assumes daytime/evening charging (via frozen BL01 non-event days or a flat

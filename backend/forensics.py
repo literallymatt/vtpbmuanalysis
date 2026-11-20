@@ -18,8 +18,8 @@ PRIMARY_EV_LEADERS = {"MERCURY", "NITTWO01", "BRITGAS"}
 
 # Published cheap overnight EV charging windows (Settlement Periods 1-48) per supplier
 SUPPLIER_EV_OFFPEAK_SPS: dict[str, set[int]] = {
-    "MERCURY": set(range(1, 12)) | {48},   # Octopus Go / IOG: 23:30-05:30
-    "NITTWO01": set(range(1, 15)),         # E.ON Next Drive: 00:00-07:00
+    "MERCURY": set(range(1, 12)) | {48},   # Intelligent Octopus Go: 23:30-05:30 (Go: 00:30-05:30)
+    "NITTWO01": set(range(1, 13)),         # E.ON Next Drive: 00:00-06:00
     "BRITGAS": set(range(1, 11)),          # British Gas Electric Driver: 00:00-05:00
     "SPSUP01": set(range(1, 11)),          # ScottishPower EV Optimise: 00:00-05:00
     "OVOE": set(range(1, 12)) | {48},      # OVO Charge Anytime / overnight proxy
