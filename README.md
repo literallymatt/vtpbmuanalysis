@@ -20,13 +20,25 @@ An interactive forensic analytics web application for Great Britain **Virtual Tr
      5. **Continuous Duty Cycle & 00:00–05:30 EV Cliff**: average active hours/day and daytime-to-overnight drop-off aligned with Intelligent Octopus Go / Next Drive windows, plus pre-evening turn-up detection.
      6. **Multi-Day Persistence (Frozen BL01 Baseline)**: active day consistency and Coefficient of Variation (`CoV`) testing whether BL01 non-event lookback exclusions freeze an inflated baseline across weeks.
 
-## Empirical Snapshot (October 2026 — 30 Settled Days)
+## Summary Report (HTML / Print-to-PDF)
 
-From live Elexon SAA-I014 settlement data (`2026-10-01` to `2026-10-30`, 678,111 BMU×SP records):
-- **Total BMU-attributed compensation:** **£8.36m** (£278.7k/day, **~£101.7m/yr** annualised), reconciling to **£0.00** against total mutualised `scvp` (£8.36m).
-- **Net mutualisation winners:** Octopus Energy (`MERCURY`, +£2.92m net), E.ON Next (`NITTWO01`, +£1.05m net), British Gas (`BRITGAS`, +£659k net).
-- **Net mutualisation payers:** EDF Energy (`LENCO`, -£879k net), TotalEnergies (`TFEGP`, -£470k net), Npower Commercial (`NPOWER02`, -£419k net), Drax Energy Solutions (`HAVEN`, -£352k net).
-- **EV & Baselining Forensics:** **95.8%** (£8.01m) of compensation stems from EV-focused domestic aggregators (`EV Focus ≥ 65`), and **73.4%** (£6.13m) simultaneously exhibits high-risk baselining signatures (`Risk ≥ 65`) — led by Axle Energy (`AXLEENER`, 65.1% share, 99.7% one-sided turn-down, 19.5 hrs/day, CoV 0.113, 4.06× Octopus lift) and Joulen (`POWONTEC`, 6.5% share, 99.6% one-sided, 14.5 hrs/day).
+A standalone, self-contained executive policy report with embedded inline SVG charts from **35 consecutive days of live Elexon SAA-I014 data (`2026-10-01` – `2026-11-04`, 647,682 SBMU×SP rows)** is checked into the repository:
+
+- **[reports/vtp_baseline_bl01_audit_report.html](reports/vtp_baseline_bl01_audit_report.html)** (open in any browser; regenerated via `uv run python scripts/generate_report.py`)
+- **[reports/vtp_baseline_bl01_audit_report.pdf](reports/vtp_baseline_bl01_audit_report.pdf)** (PDF rendering of the same report)
+
+## Empirical Snapshot (35 Settled Days: `2026-10-01` – `2026-11-04`)
+
+From live Elexon SAA-I014 settlement data (`bm-unit-level` + `primary-secondary-bm-unit-level`):
+- **Baseline & BL01 Audit (647,682 SBMU×SP rows across 399 `V__*` SBMUs & 26 VTPs):**
+  - **145,368 MWh** settled turn-down vs **59,811 MWh** un-notified overnight rebound (**41.1% leakage**, **£6.37M** implied unsettled SSC compensation).
+  - **0.603 MWh/SP** non-active baseline MAE (`-0.216` bias), **+63.6 pp** asymmetric selection gap (`96.4%` positive on active SPs vs `32.8%` inactive), and **15,688 MWh (10.8%)** counter-economic turn-down (`SBP < SSC`).
+  - **10 BL01** vs **3 self-nominated** VTPs (including `AXLEENER` frozen ~2× daytime BL01 lookback, `REFLEXI` 108.1% overnight rebound leakage, and `POWONTEC` 100% 2dp quantised self-nominated SEV).
+- **October 30-day Mutualisation Snapshot (`2026-10-01` to `2026-10-30`, 678,111 BMU×SP records):**
+  - **Total BMU-attributed compensation:** **£8.36m** (£278.7k/day, **~£101.7m/yr** annualised), reconciling to **£0.00** against total mutualised `scvp` (£8.36m).
+  - **Net mutualisation winners:** Octopus Energy (`MERCURY`, +£2.92m net), E.ON Next (`NITTWO01`, +£1.05m net), British Gas (`BRITGAS`, +£659k net).
+  - **Net mutualisation payers:** EDF Energy (`LENCO`, -£879k net), TotalEnergies (`TFEGP`, -£470k net), Npower Commercial (`NPOWER02`, -£419k net), Drax Energy Solutions (`HAVEN`, -£352k net).
+  - **EV & Baselining Forensics:** **95.8%** (£8.01m) of compensation stems from EV-focused domestic aggregators (`EV Focus ≥ 65`), and **73.4%** (£6.13m) simultaneously exhibits high-risk baselining signatures (`Risk ≥ 65`).
 
 ## Public Elexon Data Sources (No API Key Required)
 
