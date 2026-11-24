@@ -60,10 +60,17 @@ def get_status(conn: sqlite3.Connection) -> dict[str, Any]:
         FROM ingested_days WHERE has_party_level = 1
         """
     ).fetchone()
+    base = conn.execute(
+        """
+        SELECT COUNT(*) AS n, MIN(settlement_date) AS min_d, MAX(settlement_date) AS max_d
+        FROM ingested_days WHERE has_sbmu_baselines = 1
+        """
+    ).fetchone()
     parties_n = conn.execute("SELECT COUNT(*) FROM parties").fetchone()[0]
     vtps_n = conn.execute("SELECT COUNT(*) FROM parties WHERE is_vtp = 1").fetchone()[0]
     bmus_n = conn.execute("SELECT COUNT(*) FROM bmus").fetchone()[0]
     rows_n = conn.execute("SELECT COUNT(*) FROM bmu_sp_compensation").fetchone()[0]
+    base_rows_n = conn.execute("SELECT COUNT(*) FROM sbmu_baseline_sp").fetchone()[0]
 
     run_breakdown = [
         {"run_type": r["run_type"], "days": r["n"]}
@@ -76,6 +83,9 @@ def get_status(conn: sqlite3.Connection) -> dict[str, Any]:
         "granular_days": gran["n"],
         "granular_min_date": gran["min_d"],
         "granular_max_date": gran["max_d"],
+        "baseline_days": base["n"],
+        "baseline_min_date": base["min_d"],
+        "baseline_max_date": base["max_d"],
         "macro_days": macro["n"],
         "macro_min_date": macro["min_d"],
         "macro_max_date": macro["max_d"],
@@ -83,6 +93,7 @@ def get_status(conn: sqlite3.Connection) -> dict[str, Any]:
         "registered_vtps_count": vtps_n,
         "bmus_count": bmus_n,
         "bmu_sp_rows": rows_n,
+        "sbmu_baseline_rows": base_rows_n,
         "run_breakdown": run_breakdown,
     }
 

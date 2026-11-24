@@ -1,4 +1,5 @@
 import type {
+  BaselineAuditResponse,
   CompensationResponse,
   ExplorerResponse,
   ForensicsResponse,
@@ -66,6 +67,40 @@ export const api = {
       `/api/forensics${buildQuery({ start_date: startDate, end_date: endDate })}`,
     ),
 
+  getBaselineAudit: (
+    startDate?: string,
+    endDate?: string,
+    secPartyId?: string,
+    secBmuId?: string,
+  ) =>
+    getJson<BaselineAuditResponse>(
+      `/api/baseline-audit${buildQuery({
+        start_date: startDate,
+        end_date: endDate,
+        sec_party_id: secPartyId,
+        sec_bmu_id: secBmuId,
+      })}`,
+    ),
+
+  baselineAuditCsvUrl: (startDate?: string, endDate?: string) =>
+    `/api/baseline-audit/export.csv${buildQuery({
+      start_date: startDate,
+      end_date: endDate,
+    })}`,
+
+  baselineAuditBriefingUrl: (
+    startDate?: string,
+    endDate?: string,
+    secPartyId?: string,
+    secBmuId?: string,
+  ) =>
+    `/api/baseline-audit/briefing.md${buildQuery({
+      start_date: startDate,
+      end_date: endDate,
+      sec_party_id: secPartyId,
+      sec_bmu_id: secBmuId,
+    })}`,
+
   getExplorer: (params: {
     start_date?: string;
     end_date?: string;
@@ -97,6 +132,7 @@ export const api = {
     start_date: string;
     end_date: string;
     include_bmu_sp: boolean;
+    include_baselines?: boolean;
     force?: boolean;
   }) => {
     const res = await fetch('/api/sync/dates', {

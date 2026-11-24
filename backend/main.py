@@ -24,6 +24,11 @@ from .analytics import (
     get_status,
     get_timing,
 )
+from .baseline_audit import (
+    build_sbmu_audit_csv_rows,
+    compute_baseline_audit,
+    render_policy_briefing_md,
+)
 from .db import get_conn, init_db
 from .forensics import compute_forensics
 from .ingest import IngestProgress, ingest_date_range, sync_reference_data
@@ -59,6 +64,7 @@ class SyncDatesRequest(BaseModel):
     start_date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
     end_date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
     include_bmu_sp: bool = True
+    include_baselines: bool = False
     force: bool = False
 
 
@@ -73,6 +79,34 @@ def _resolve_date_window(
         default_start = row["min_d"] or "2026-10-01"
         default_end = row["max_d"] or "2026-10-30"
     return start_date or default_start, end_date or default_end
+
+
+def _resolve_baseline_window(
+    start_date: str | None, end_date: str | None
+) -> tuple[str, str]:
+    if start_date and end_date:
+        return start_date, end_date
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT MIN(settlement_date) AS min_d, MAX(settlement_date) AS max_d "
+            "FROM ingested_days WHERE has_sbmu_baselines = 1"
+        ).fetchone()
+        min_d, max_d = row["min_d"], row["max_d"]
+        if not min_d or not max_d:
+            fb = conn.execute(
+                "SELECT MIN(settlement_date) AS min_d, MAX(settlement_date) AS max_d "
+                "FROM sbmu_baseline_sp"
+            ).fetchone()
+            min_d = min_d or fb["min_d"]
+            max_d = max_d or fb["max_d"]
+        if not min_d or not max_d:
+            gran = conn.execute(
+                "SELECT MIN(settlement_date) AS min_d, MAX(settlement_date) AS max_d "
+                "FROM ingested_days WHERE has_bmu_sp = 1"
+            ).fetchone()
+            min_d = min_d or gran["min_d"] or "2026-10-01"
+            max_d = max_d or gran["max_d"] or "2026-10-30"
+    return start_date or min_d, end_date or max_d
 
 
 @app.get("/api/status")
@@ -129,6 +163,81 @@ def api_forensics(
     s, e = _resolve_date_window(start_date, end_date)
     with get_conn() as conn:
         return compute_forensics(conn, s, e)
+
+
+@app.get("/api/baseline-audit")
+def api_baseline_audit(
+    start_date: str | None = Query(default=None),
+    end_date: str | None = Query(default=None),
+    sec_party_id: str | None = Query(default=None),
+    sec_bmu_id: str | None = Query(default=None),
+) -> dict[str, Any]:
+    s, e = _resolve_baseline_window(start_date, end_date)
+    with get_conn() as conn:
+        return compute_baseline_audit(
+            conn,
+            s,
+            e,
+            sec_party_id=sec_party_id or None,
+            sec_bmu_id=sec_bmu_id or None,
+        )
+
+
+@app.get("/api/baseline-audit/export.csv")
+def api_baseline_audit_csv(
+    start_date: str | None = Query(default=None),
+    end_date: str | None = Query(default=None),
+    sec_party_id: str | None = Query(default=None),
+    sec_bmu_id: str | None = Query(default=None),
+) -> StreamingResponse:
+    s, e = _resolve_baseline_window(start_date, end_date)
+    with get_conn() as conn:
+        rows = build_sbmu_audit_csv_rows(
+            conn,
+            s,
+            e,
+            sec_party_id=sec_party_id or None,
+            sec_bmu_id=sec_bmu_id or None,
+        )
+    buf = io.StringIO()
+    if rows:
+        writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+    else:
+        buf.write("start_date,end_date,party_id,company_name,sec_bmu_id,gsp_group,methodology_class\n")
+    buf.seek(0)
+    filename = f"vtp_baseline_audit_{s}_to_{e}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/baseline-audit/briefing.md")
+def api_baseline_audit_briefing(
+    start_date: str | None = Query(default=None),
+    end_date: str | None = Query(default=None),
+    sec_party_id: str | None = Query(default=None),
+    sec_bmu_id: str | None = Query(default=None),
+) -> StreamingResponse:
+    s, e = _resolve_baseline_window(start_date, end_date)
+    with get_conn() as conn:
+        audit_data = compute_baseline_audit(
+            conn,
+            s,
+            e,
+            sec_party_id=sec_party_id or None,
+            sec_bmu_id=sec_bmu_id or None,
+        )
+    md_text = render_policy_briefing_md(audit_data)
+    filename = f"vtp_baseline_policy_briefing_{s}_to_{e}.md"
+    return StreamingResponse(
+        iter([md_text]),
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/api/explorer")
@@ -222,6 +331,7 @@ async def _run_sync_job(req: SyncDatesRequest) -> None:
             req.start_date,
             req.end_date,
             include_bmu_sp=req.include_bmu_sp,
+            include_baselines=req.include_baselines,
             force=req.force,
             progress_cb=_update,
         )

@@ -196,3 +196,220 @@ async def fetch_i014_dataset(
     resp = await client.get(url, headers={"Accept": "application/json"}, timeout=60.0)
     resp.raise_for_status()
     return resp.json()
+
+
+_PARTY_START_RE = re.compile(r'\{\s*"bscPartyId"\s*:')
+
+
+def _extract_sbmu_records_from_party(
+    party: dict[str, Any], extracted: list[dict[str, Any]]
+) -> None:
+    pid = party.get("bscPartyId") or ""
+    for sp_block in party.get("bmUnitSettlementPeriods", []):
+        sp_num = int(sp_block.get("sp", 0))
+        if sp_num <= 0:
+            continue
+        for bmu in sp_block.get("bmUnitPeriodData", []):
+            bmu_id = bmu.get("bmUnitId") or ""
+            if not bmu_id.startswith("V__"):
+                continue
+            extracted.append(
+                {
+                    "sp": sp_num,
+                    "sec_party_id": pid,
+                    "sec_bmu_id": bmu_id,
+                    "pc_flag": bmu.get("pcFlag") or "",
+                    "fpn": bmu.get("fpnij"),
+                    "qme": bmu.get("qmeij"),
+                    "sev": bmu.get("sevij"),
+                    "qm": bmu.get("qmij"),
+                    "qdei": bmu.get("qdei2j"),
+                    "qsd": bmu.get("qsdij"),
+                    "qcv": bmu.get("qcviji2"),
+                    "wmi": bmu.get("wmi2j"),
+                    "wmi_flag": bmu.get("wmi2jF"),
+                }
+            )
+
+
+async def _parse_sbmu_baselines_stream(
+    chunks: Any,
+) -> list[dict[str, Any]]:
+    """Parse streamed JSON text chunks from bm-unit-level into V__* SBMU records.
+
+    Uses a fast C-speed party-boundary scanner (~1s per 380MB) when party objects
+    begin with `{"bscPartyId":`, with automatic fallback to a general brace-depth
+    JSON object scanner if the upstream key order differs.
+    """
+    import json
+
+    extracted: list[dict[str, Any]] = []
+    decoder = json.JSONDecoder()
+
+    in_parties = False
+    mode: str | None = None  # "fast" | "brace"
+    prefix_buf = ""
+
+    # Fast-mode state
+    fast_buf = ""
+    scan_from = 1
+
+    # Fallback brace-depth state
+    in_string = False
+    escape = False
+    brace_depth = 0
+    party_buf: list[str] = []
+
+    def _flush_fast_segment(seg: str) -> None:
+        if '"V__' not in seg:
+            return
+        party, _ = decoder.raw_decode(seg, 0)
+        _extract_sbmu_records_from_party(party, extracted)
+
+    def _flush_brace_obj(raw_obj: str) -> None:
+        if '"V__' not in raw_obj:
+            return
+        party = json.loads(raw_obj)
+        _extract_sbmu_records_from_party(party, extracted)
+
+    async for chunk in chunks:
+        if not in_parties:
+            prefix_buf += chunk
+            marker = prefix_buf.find('"bscParties"')
+            if marker == -1:
+                prefix_buf = prefix_buf[-64:]
+                continue
+            arr_start = prefix_buf.find("[", marker)
+            if arr_start == -1:
+                continue
+            in_parties = True
+            chunk = prefix_buf[arr_start + 1 :]
+            prefix_buf = ""
+
+        if mode is None:
+            prefix_buf += chunk
+            stripped = prefix_buf.lstrip()
+            if not stripped:
+                continue
+            if stripped[0] == "]":
+                return extracted
+            if stripped[0] == "{":
+                if ":" not in stripped and "}" not in stripped:
+                    # Wait for enough bytes to inspect first key
+                    continue
+                if _PARTY_START_RE.match(stripped):
+                    mode = "fast"
+                    fast_buf = stripped
+                    scan_from = 1
+                    chunk = ""
+                    prefix_buf = ""
+                else:
+                    mode = "brace"
+                    chunk = stripped
+                    prefix_buf = ""
+            else:
+                mode = "brace"
+                chunk = stripped
+                prefix_buf = ""
+
+        if mode == "fast":
+            if chunk:
+                fast_buf += chunk
+            prev = 0
+            search_start = max(1, scan_from - 32)
+            for m in _PARTY_START_RE.finditer(fast_buf, search_start):
+                pos = m.start()
+                if pos > prev:
+                    _flush_fast_segment(fast_buf[prev:pos])
+                    prev = pos
+            if prev > 0:
+                fast_buf = fast_buf[prev:]
+            scan_from = len(fast_buf)
+            continue
+
+        # Fallback brace-depth scanner
+        i = 0
+        n = len(chunk)
+        obj_start = 0 if brace_depth > 0 else -1
+        while i < n:
+            ch = chunk[i]
+            if in_string:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_string = False
+            else:
+                if ch == '"':
+                    in_string = True
+                elif ch == "{":
+                    if brace_depth == 0:
+                        obj_start = i
+                        party_buf = []
+                    brace_depth += 1
+                elif ch == "}":
+                    brace_depth -= 1
+                    if brace_depth == 0 and obj_start != -1:
+                        party_buf.append(chunk[obj_start : i + 1])
+                        _flush_brace_obj("".join(party_buf))
+                        party_buf = []
+                        obj_start = -1
+                elif ch == "]" and brace_depth == 0:
+                    return extracted
+            i += 1
+
+        if brace_depth > 0 and obj_start != -1:
+            party_buf.append(chunk[obj_start:])
+
+    if mode == "fast" and fast_buf:
+        _flush_fast_segment(fast_buf)
+    elif mode is None and prefix_buf:
+        stripped = prefix_buf.lstrip()
+        if stripped.startswith("{") and '"V__' in stripped:
+            party, _ = decoder.raw_decode(stripped, 0)
+            _extract_sbmu_records_from_party(party, extracted)
+
+    return extracted
+
+
+async def stream_sbmu_baselines(
+    client: httpx.AsyncClient,
+    settlement_date: str,
+    run_type: str,
+) -> list[dict[str, Any]]:
+    """Stream bm-unit-level and extract only Secondary BMU (V__*) records cleanly.
+
+    bm-unit-level payloads are ~350-400 MB uncompressed across ~500 parties.
+    We stream text chunks, isolate each top-level party object inside `bscParties`,
+    skip any party buffer that does not reference a `V__` Secondary BMU without
+    JSON-parsing it, and extract only the Secondary BMU settlement period records.
+    """
+    import asyncio
+
+    url = f"{SAA_BASE_URL}/bm-unit-level/{settlement_date}/{run_type}"
+    timeout = httpx.Timeout(30.0, read=180.0)
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        try:
+            async with client.stream(
+                "GET", url, headers={"Accept": "application/json"}, timeout=timeout
+            ) as resp:
+                resp.raise_for_status()
+                return await _parse_sbmu_baselines_stream(
+                    resp.aiter_text(chunk_size=262144)
+                )
+        except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
+            last_exc = exc
+            if attempt < 2:
+                await asyncio.sleep(2.0 * (attempt + 1))
+                continue
+            raise
+        except httpx.HTTPStatusError as exc:
+            last_exc = exc
+            if exc.response.status_code >= 500 and attempt < 2:
+                await asyncio.sleep(2.0 * (attempt + 1))
+                continue
+            raise
+    assert last_exc is not None
+    raise last_exc

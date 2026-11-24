@@ -58,8 +58,29 @@ def init_db(db_path: Path | None = None) -> None:
                 has_bmu_sp INTEGER DEFAULT 0,
                 has_party_level INTEGER DEFAULT 0,
                 has_sp_level INTEGER DEFAULT 0,
+                has_sbmu_baselines INTEGER DEFAULT 0,
                 created_date_time TEXT,
                 ingested_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS sbmu_baseline_sp (
+                settlement_date TEXT NOT NULL,
+                sp INTEGER NOT NULL,
+                sec_bmu_id TEXT NOT NULL,
+                run_type TEXT NOT NULL,
+                sec_party_id TEXT NOT NULL,
+                gsp_group TEXT DEFAULT '',
+                pc_flag TEXT DEFAULT '',
+                fpn REAL DEFAULT 0,
+                qme REAL DEFAULT 0,
+                sev REAL DEFAULT 0,
+                qm REAL DEFAULT 0,
+                qdei REAL DEFAULT 0,
+                qsd REAL DEFAULT 0,
+                qcv REAL DEFAULT 0,
+                wmi REAL DEFAULT 0,
+                wmi_flag INTEGER DEFAULT 0,
+                PRIMARY KEY (settlement_date, sp, sec_bmu_id)
             );
 
             CREATE TABLE IF NOT EXISTS sp_market_data (
@@ -124,8 +145,21 @@ def init_db(db_path: Path | None = None) -> None:
                 ON party_daily_settlement (party_id, settlement_date);
             CREATE INDEX IF NOT EXISTS idx_bmus_party
                 ON bmus (lead_party_id);
+            CREATE INDEX IF NOT EXISTS idx_sbmu_base_party_date
+                ON sbmu_baseline_sp (sec_party_id, settlement_date);
+            CREATE INDEX IF NOT EXISTS idx_sbmu_base_bmu_date
+                ON sbmu_baseline_sp (sec_bmu_id, settlement_date);
             """
         )
+        # Safe migration for existing SQLite databases created before has_sbmu_baselines
+        cols = {
+            r[1]
+            for r in conn.execute("PRAGMA table_info(ingested_days)").fetchall()
+        }
+        if "has_sbmu_baselines" not in cols:
+            conn.execute(
+                "ALTER TABLE ingested_days ADD COLUMN has_sbmu_baselines INTEGER DEFAULT 0"
+            )
 
 
 @contextmanager

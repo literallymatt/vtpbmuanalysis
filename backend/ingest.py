@@ -20,6 +20,7 @@ from .elexon import (
     fetch_bsc_signatories,
     fetch_i014_dataset,
     resolve_best_run_type,
+    stream_sbmu_baselines,
 )
 
 RUN_RANK = {rt: i for i, rt in enumerate(RUN_TYPE_PRIORITY)}
@@ -167,55 +168,178 @@ async def sync_reference_data(
     return {"signatories": len(signatories), "bmus": len(bmu_rows)}
 
 
+def _flag_to_int(val: object) -> int:
+    if isinstance(val, bool):
+        return int(val)
+    if isinstance(val, (int, float)):
+        return 1 if val else 0
+    if isinstance(val, str):
+        return 1 if val.strip().upper() in ("1", "T", "TRUE", "Y", "YES") else 0
+    return int(bool(val))
+
+
+def _build_sbmu_baseline_rows(
+    settlement_date: str,
+    run_type: str,
+    sbmu_baselines: list[dict[str, object]],
+) -> list[tuple[object, ...]]:
+    rows: list[tuple[object, ...]] = []
+    for r in sbmu_baselines:
+        sec_bmu = str(r.get("sec_bmu_id") or "")
+        rows.append(
+            (
+                settlement_date,
+                int(r["sp"]),  # type: ignore[arg-type]
+                sec_bmu,
+                run_type,
+                str(r.get("sec_party_id") or ""),
+                extract_gsp_group(sec_bmu),
+                str(r.get("pc_flag") or ""),
+                _safe_float(r.get("fpn")),
+                _safe_float(r.get("qme")),
+                _safe_float(r.get("sev")),
+                _safe_float(r.get("qm")),
+                _safe_float(r.get("qdei")),
+                _safe_float(r.get("qsd")),
+                _safe_float(r.get("qcv")),
+                _safe_float(r.get("wmi")),
+                _flag_to_int(r.get("wmi_flag")),
+            )
+        )
+    return rows
+
+
+def _get_existing_day(
+    settlement_date: str,
+    db_path: Path | None = None,
+) -> dict[str, object] | None:
+    with get_conn(db_path) as conn:
+        row = conn.execute(
+            "SELECT run_type, has_bmu_sp, has_party_level, has_sp_level, "
+            "has_sbmu_baselines, created_date_time "
+            "FROM ingested_days WHERE settlement_date = ?",
+            (settlement_date,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def _should_skip_day_row(
+    row: dict[str, object] | None,
+    include_bmu_sp: bool,
+    include_baselines: bool,
+    force: bool,
+) -> bool:
+    if force or not row:
+        return False
+    if include_bmu_sp and not row["has_bmu_sp"]:
+        return False
+    if include_baselines and not row["has_sbmu_baselines"]:
+        return False
+    return bool(row["has_party_level"] and row["has_sp_level"])
+
+
 def _should_skip_day(
     settlement_date: str,
     include_bmu_sp: bool,
+    include_baselines: bool,
     force: bool,
     db_path: Path | None = None,
 ) -> bool:
     if force:
         return False
-    with get_conn(db_path) as conn:
-        row = conn.execute(
-            "SELECT run_type, has_bmu_sp, has_party_level, has_sp_level "
-            "FROM ingested_days WHERE settlement_date = ?",
-            (settlement_date,),
-        ).fetchone()
-        if not row:
-            return False
-        if include_bmu_sp and not row["has_bmu_sp"]:
-            return False
-        return bool(row["has_party_level"] and row["has_sp_level"])
+    return _should_skip_day_row(
+        _get_existing_day(settlement_date, db_path),
+        include_bmu_sp,
+        include_baselines,
+        force,
+    )
 
 
 async def ingest_day(
     client: httpx.AsyncClient,
     settlement_date: str,
     include_bmu_sp: bool = True,
+    include_baselines: bool = False,
     force: bool = False,
     db_path: Path | None = None,
 ) -> dict[str, object]:
     """Fetch and store SAA-I014 data for a single settlement date."""
-    if _should_skip_day(settlement_date, include_bmu_sp, force, db_path):
+    existing = None if force else _get_existing_day(settlement_date, db_path)
+    if _should_skip_day_row(existing, include_bmu_sp, include_baselines, force):
         return {"date": settlement_date, "status": "skipped"}
+
+    # Fast path: party-level, sp-level (and bmu_sp if requested) already cached;
+    # only stream Secondary BMU baselines using the existing settlement run_type.
+    only_baselines = (
+        not force
+        and existing is not None
+        and bool(existing["has_party_level"])
+        and bool(existing["has_sp_level"])
+        and (not include_bmu_sp or bool(existing["has_bmu_sp"]))
+        and include_baselines
+        and not bool(existing["has_sbmu_baselines"])
+    )
+    if only_baselines:
+        assert existing is not None
+        run_type = str(existing["run_type"])
+        sbmu_baselines = await stream_sbmu_baselines(client, settlement_date, run_type)
+        baseline_rows = _build_sbmu_baseline_rows(
+            settlement_date, run_type, sbmu_baselines
+        )
+        now = _utc_now()
+        with get_conn(db_path) as conn:
+            conn.execute(
+                "DELETE FROM sbmu_baseline_sp WHERE settlement_date = ?",
+                (settlement_date,),
+            )
+            conn.executemany(
+                """
+                INSERT OR REPLACE INTO sbmu_baseline_sp (
+                    settlement_date, sp, sec_bmu_id, run_type, sec_party_id,
+                    gsp_group, pc_flag, fpn, qme, sev, qm, qdei, qsd, qcv,
+                    wmi, wmi_flag
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                baseline_rows,
+            )
+            conn.execute(
+                """
+                UPDATE ingested_days
+                SET has_sbmu_baselines = MAX(has_sbmu_baselines, 1),
+                    ingested_at = ?
+                WHERE settlement_date = ?
+                """,
+                (now, settlement_date),
+            )
+        return {
+            "date": settlement_date,
+            "status": "ingested",
+            "run_type": run_type,
+            "bmu_sp_rows": 0,
+            "party_rows": 0,
+            "baseline_rows": len(baseline_rows),
+        }
 
     resolved = await resolve_best_run_type(client, settlement_date)
     if resolved is None:
         return {"date": settlement_date, "status": "unavailable"}
 
     run_type, party_payload = resolved
-    tasks = [
-        fetch_i014_dataset(client, "settlement-period-level", settlement_date, run_type)
-    ]
-    if include_bmu_sp:
-        tasks.append(
-            fetch_i014_dataset(
-                client, "primary-secondary-bm-unit-level", settlement_date, run_type
-            )
+    sp_payload = await fetch_i014_dataset(
+        client, "settlement-period-level", settlement_date, run_type
+    )
+    ps_payload = (
+        await fetch_i014_dataset(
+            client, "primary-secondary-bm-unit-level", settlement_date, run_type
         )
-    results = await asyncio.gather(*tasks)
-    sp_payload = results[0]
-    ps_payload = results[1] if include_bmu_sp else None
+        if include_bmu_sp
+        else None
+    )
+    sbmu_baselines = (
+        await stream_sbmu_baselines(client, settlement_date, run_type)
+        if include_baselines
+        else None
+    )
 
     header = party_payload.get("settlementReportHeader", {})
     created_dt = header.get("createdDateTime", "")
@@ -310,6 +434,12 @@ async def ingest_day(
                     )
                 )
 
+    baseline_rows = (
+        _build_sbmu_baseline_rows(settlement_date, run_type, sbmu_baselines)
+        if sbmu_baselines is not None
+        else []
+    )
+
     with get_conn(db_path) as conn:
         conn.execute(
             "DELETE FROM sp_market_data WHERE settlement_date = ?", (settlement_date,)
@@ -353,27 +483,48 @@ async def ingest_day(
                 bmu_sp_rows,
             )
 
-        existing = conn.execute(
-            "SELECT has_bmu_sp FROM ingested_days WHERE settlement_date = ?",
-            (settlement_date,),
-        ).fetchone()
-        has_bmu_sp = 1 if (ps_payload is not None or (existing and existing["has_bmu_sp"])) else 0
+        if sbmu_baselines is not None:
+            conn.execute(
+                "DELETE FROM sbmu_baseline_sp WHERE settlement_date = ?",
+                (settlement_date,),
+            )
+            conn.executemany(
+                """
+                INSERT OR REPLACE INTO sbmu_baseline_sp (
+                    settlement_date, sp, sec_bmu_id, run_type, sec_party_id,
+                    gsp_group, pc_flag, fpn, qme, sev, qm, qdei, qsd, qcv,
+                    wmi, wmi_flag
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                baseline_rows,
+            )
+
+        has_bmu_sp = 1 if ps_payload is not None else 0
+        has_sbmu_baselines = 1 if sbmu_baselines is not None else 0
 
         conn.execute(
             """
             INSERT INTO ingested_days (
                 settlement_date, run_type, has_bmu_sp, has_party_level,
-                has_sp_level, created_date_time, ingested_at
-            ) VALUES (?, ?, ?, 1, 1, ?, ?)
+                has_sp_level, has_sbmu_baselines, created_date_time, ingested_at
+            ) VALUES (?, ?, ?, 1, 1, ?, ?, ?)
             ON CONFLICT(settlement_date) DO UPDATE SET
                 run_type = excluded.run_type,
                 has_bmu_sp = MAX(ingested_days.has_bmu_sp, excluded.has_bmu_sp),
                 has_party_level = 1,
                 has_sp_level = 1,
+                has_sbmu_baselines = MAX(ingested_days.has_sbmu_baselines, excluded.has_sbmu_baselines),
                 created_date_time = excluded.created_date_time,
                 ingested_at = excluded.ingested_at
             """,
-            (settlement_date, run_type, has_bmu_sp, created_dt, now),
+            (
+                settlement_date,
+                run_type,
+                has_bmu_sp,
+                has_sbmu_baselines,
+                created_dt,
+                now,
+            ),
         )
 
     return {
@@ -382,6 +533,7 @@ async def ingest_day(
         "run_type": run_type,
         "bmu_sp_rows": len(bmu_sp_rows),
         "party_rows": len(party_rows),
+        "baseline_rows": len(baseline_rows),
     }
 
 
@@ -400,6 +552,7 @@ async def ingest_date_range(
     start_date: str,
     end_date: str,
     include_bmu_sp: bool = True,
+    include_baselines: bool = False,
     step_days: int = 1,
     concurrency: int = 4,
     force: bool = False,
@@ -428,6 +581,7 @@ async def ingest_date_range(
                         client,
                         d,
                         include_bmu_sp=include_bmu_sp,
+                        include_baselines=include_baselines,
                         force=force,
                         db_path=db_path,
                     )
@@ -436,7 +590,7 @@ async def ingest_date_range(
                     elif res["status"] == "unavailable":
                         prog.failed_days.append(f"{d} (not published yet)")
                 except Exception as exc:  # noqa: BLE001
-                    prog.failed_days.append(f"{d} ({type(exc).__name__})")
+                    prog.failed_days.append(f"{d} ({type(exc).__name__}: {exc})")
                 finally:
                     prog.completed_days += 1
                     if progress_cb:
@@ -465,6 +619,11 @@ async def _cli_main() -> None:
         action="store_true",
         help="Only ingest party-level + SP-level (skip large BMU×SP files)",
     )
+    parser.add_argument(
+        "--baselines",
+        action="store_true",
+        help="Stream bm-unit-level to ingest Secondary BMU (V__*) baselines (sev/qm/wmi)",
+    )
     parser.add_argument("--step", type=int, default=1, help="Day step interval (default 1)")
     parser.add_argument("--concurrency", type=int, default=4)
     parser.add_argument("--force", action="store_true")
@@ -477,22 +636,33 @@ async def _cli_main() -> None:
 
     if args.start and args.end:
         def _log(p: IngestProgress) -> None:
-            if p.completed_days % 5 == 0 or p.completed_days == p.total_days:
+            if (
+                p.completed_days > 0
+                and (
+                    p.total_days <= 40
+                    or p.completed_days % 5 == 0
+                    or p.completed_days == p.total_days
+                )
+            ):
                 print(
                     f"[{p.completed_days}/{p.total_days}] latest={p.current_date} "
-                    f"skipped={p.skipped_days} failed={len(p.failed_days)}"
+                    f"skipped={p.skipped_days} failed={len(p.failed_days)}",
+                    flush=True,
                 )
 
         res = await ingest_date_range(
             args.start,
             args.end,
             include_bmu_sp=not args.macro_only,
+            include_baselines=args.baselines,
             step_days=args.step,
             concurrency=args.concurrency,
             force=args.force,
             progress_cb=_log,
         )
-        print(res.message)
+        print(res.message, flush=True)
+        if res.failed_days:
+            print("Failed days:", res.failed_days, flush=True)
 
 
 if __name__ == "__main__":

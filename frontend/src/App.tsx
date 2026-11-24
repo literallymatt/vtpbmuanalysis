@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
+import { BaselineAuditView } from './components/BaselineAuditView';
 import { CompensationView } from './components/CompensationView';
 import { ExplorerView } from './components/ExplorerView';
 import { ForensicsView } from './components/ForensicsView';
@@ -9,6 +10,7 @@ import { SyncModal } from './components/SyncModal';
 import { TimingView } from './components/TimingView';
 import { TopBar } from './components/TopBar';
 import type {
+  BaselineAuditResponse,
   CompensationResponse,
   ForensicsResponse,
   OverviewResponse,
@@ -28,11 +30,14 @@ export default function App() {
   const [compVtp, setCompVtp] = useState<string>('');
   const [compSupplier, setCompSupplier] = useState<string>('');
   const [forensicsVtp, setForensicsVtp] = useState<string>('');
+  const [auditVtp, setAuditVtp] = useState<string>('');
+  const [auditBmu, setAuditBmu] = useState<string>('');
 
   const [overview, setOverview] = useState<OverviewResponse | null>(null);
   const [timing, setTiming] = useState<TimingResponse | null>(null);
   const [compensation, setCompensation] = useState<CompensationResponse | null>(null);
   const [forensics, setForensics] = useState<ForensicsResponse | null>(null);
+  const [baselineAudit, setBaselineAudit] = useState<BaselineAuditResponse | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -87,6 +92,14 @@ export default function App() {
             compSupplier || undefined,
           );
           if (!cancelled) setCompensation(d);
+        } else if (activeTab === 'baseline_audit') {
+          const d = await api.getBaselineAudit(
+            startDate,
+            endDate,
+            auditVtp || undefined,
+            auditBmu || undefined,
+          );
+          if (!cancelled) setBaselineAudit(d);
         } else if (activeTab === 'forensics') {
           const d = await api.getForensics(startDate, endDate);
           if (!cancelled) setForensics(d);
@@ -101,13 +114,30 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, startDate, endDate, timingVtp, compVtp, compSupplier, reloadTick]);
+  }, [
+    activeTab,
+    startDate,
+    endDate,
+    timingVtp,
+    compVtp,
+    compSupplier,
+    auditVtp,
+    auditBmu,
+    reloadTick,
+  ]);
 
   function handleNavigate(tab: TabId, vtpId?: string) {
     if (tab === 'forensics' && vtpId) setForensicsVtp(vtpId);
     if (tab === 'timing' && vtpId) setTimingVtp(vtpId);
+    if (tab === 'baseline_audit' && vtpId) {
+      setAuditVtp(vtpId);
+      setAuditBmu('');
+    }
     setActiveTab(tab);
   }
+
+  const showInitialLoader =
+    loading && !error && !(activeTab === 'baseline_audit' && baselineAudit !== null);
 
   return (
     <div className="app-shell">
@@ -126,7 +156,7 @@ export default function App() {
 
         <main className="content-wrap">
           {error && <div className="error-state">Failed to load data: {error}</div>}
-          {loading && !error && (
+          {showInitialLoader && (
             <div className="loading-state">Loading Elexon SAA-I014 analytics...</div>
           )}
 
@@ -150,6 +180,24 @@ export default function App() {
               onFilterVtp={setCompVtp}
               onFilterSupplier={setCompSupplier}
               onInspectVtp={(id) => handleNavigate('forensics', id)}
+            />
+          )}
+
+          {!error && activeTab === 'baseline_audit' && baselineAudit && (
+            <BaselineAuditView
+              data={baselineAudit}
+              selectedPartyId={auditVtp}
+              selectedBmuId={auditBmu}
+              isRefreshing={loading}
+              onSelectVtp={(partyId) => {
+                setAuditVtp(partyId);
+                setAuditBmu('');
+              }}
+              onSelectBmu={(partyId, bmuId) => {
+                setAuditVtp(partyId);
+                setAuditBmu(bmuId);
+              }}
+              onOpenSync={() => setSyncOpen(true)}
             />
           )}
 

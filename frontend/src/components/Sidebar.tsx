@@ -2,6 +2,7 @@ import {
   Activity,
   Clock,
   ArrowLeftRight,
+  Scale,
   ShieldAlert,
   Table2,
 } from 'lucide-react';
@@ -17,6 +18,7 @@ const ANALYSIS_NAV: { id: TabId; label: string; icon: typeof Activity }[] = [
   { id: 'overview', label: 'Settlement overview', icon: Activity },
   { id: 'timing', label: 'When VTPs trade', icon: Clock },
   { id: 'compensation', label: 'Supplier compensation', icon: ArrowLeftRight },
+  { id: 'baseline_audit', label: 'Baseline & BL01 audit', icon: Scale },
   { id: 'forensics', label: 'EV baselining lab', icon: ShieldAlert },
 ];
 
@@ -69,6 +71,10 @@ export function Sidebar({ activeTab, onSelectTab, status }: Props) {
         <div className="sidebar-stat-row">
           <span>Granular BMU days</span>
           <span className="sidebar-stat-val">{status?.granular_days ?? '—'}</span>
+        </div>
+        <div className="sidebar-stat-row">
+          <span>Baseline days</span>
+          <span className="sidebar-stat-val">{status?.baseline_days ?? '—'}</span>
         </div>
         <div className="sidebar-stat-row">
           <span>Macro history days</span>

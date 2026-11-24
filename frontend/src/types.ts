@@ -1,4 +1,10 @@
-export type TabId = 'overview' | 'timing' | 'compensation' | 'forensics' | 'explorer';
+export type TabId =
+  | 'overview'
+  | 'timing'
+  | 'compensation'
+  | 'baseline_audit'
+  | 'forensics'
+  | 'explorer';
 
 export interface SyncProgress {
   status: string;
@@ -16,6 +22,9 @@ export interface StatusResponse {
   granular_days: number;
   granular_min_date: string | null;
   granular_max_date: string | null;
+  baseline_days: number;
+  baseline_min_date: string | null;
+  baseline_max_date: string | null;
   macro_days: number;
   macro_min_date: string | null;
   macro_max_date: string | null;
@@ -23,6 +32,7 @@ export interface StatusResponse {
   registered_vtps_count: number;
   bmus_count: number;
   bmu_sp_rows: number;
+  sbmu_baseline_rows: number;
   run_breakdown: { run_type: string; days: number }[];
   sync: SyncProgress;
 }
@@ -351,4 +361,142 @@ export interface PartiesResponse {
     vtp_comp_gbp: number;
     source: string;
   }[];
+}
+
+export interface BaselineAuditSbmu {
+  sec_bmu_id: string;
+  gsp_group: string;
+  settled_turndown_mwh: number;
+  unsettled_rebound_mwh: number;
+  non_active_mae_mwh: number;
+  bl01_r2: number | null;
+  quantised_2dp_pct: number;
+  sev_coverage_pct: number;
+  methodology_class: string;
+}
+
+export interface BaselineAuditMetrics {
+  sbmu_count?: number;
+  active_days?: number;
+  settled_turndown_mwh: number;
+  unsettled_rebound_mwh: number;
+  rebound_leakage_pct: number;
+  implied_unsettled_comp_gbp: number;
+  non_active_mae_mwh: number;
+  non_active_rmse_mwh: number;
+  non_active_mape_pct: number | null;
+  non_active_bias_mwh: number;
+  over_forecast_rate_pct: number;
+  active_mean_dev_mwh: number;
+  inactive_mean_dev_mwh: number;
+  active_positive_pct: number;
+  inactive_positive_pct: number;
+  bl01_r2: number | null;
+  bl01_mae_mwh: number | null;
+  bl01_drift_mwh: number | null;
+  quantised_2dp_pct: number;
+  sev_coverage_pct: number;
+  ida_pre_ramp_mw: number | null;
+}
+
+export interface BaselineAuditVtp extends BaselineAuditMetrics {
+  party_id: string;
+  company_name: string;
+  roles: string[];
+  sbmu_count: number;
+  active_days: number;
+  methodology_class: string;
+  methodology_reasons: string[];
+  sbmus: BaselineAuditSbmu[];
+}
+
+export interface BaselineAuditSpOverlay {
+  sp: number;
+  time: string;
+  baseline_demand_mw: number;
+  actual_demand_mw: number;
+  settled_turndown_mw: number;
+  unsettled_rebound_mw: number;
+  avg_sbp: number;
+  avg_ssc: number;
+  activation_rate_pct: number;
+}
+
+export interface BaselineAuditCherryPickBin {
+  bin_label: string;
+  bin_center: number;
+  active_pct: number;
+  inactive_pct: number;
+  active_count: number;
+  inactive_count: number;
+}
+
+export interface BaselineAuditDailyPoint {
+  date: string;
+  dow: string;
+  actual_demand_mwh: number;
+  settled_sev_mwh: number;
+  bl01_raw_mwh: number | null;
+  bl01_excl_mwh: number | null;
+  active_sps: number;
+  settled_turndown_mwh: number;
+  unsettled_rebound_mwh: number;
+}
+
+export interface BaselineAuditIdaOffset {
+  offset_sp: number;
+  label: string;
+  avg_actual_mw: number;
+  avg_baseline_mw: number;
+  excess_load_mw: number;
+}
+
+export interface BaselineAuditPriceRegime {
+  regime: string;
+  sps_count: number;
+  settled_turndown_mwh: number;
+  settled_turnup_mwh: number;
+  unsettled_rebound_mwh: number;
+  avg_sbp: number;
+  activation_rate_pct: number;
+}
+
+export interface BaselineAuditDetail {
+  party_id: string;
+  company_name: string;
+  sec_bmu_id: string | null;
+  methodology_class: string;
+  methodology_reasons: string[];
+  metrics: BaselineAuditMetrics;
+  sp_overlay: BaselineAuditSpOverlay[];
+  cherry_pick_hist: BaselineAuditCherryPickBin[];
+  bl01_daily_series: BaselineAuditDailyPoint[];
+  ida_pre_ramp: {
+    pre_event_window_sp_offsets: BaselineAuditIdaOffset[];
+    transitions_count: number;
+    pre_ramp_excess_mw: number;
+  };
+  price_regimes: BaselineAuditPriceRegime[];
+}
+
+export interface BaselineAuditResponse {
+  start_date: string;
+  end_date: string;
+  baseline_days: number;
+  selected_party_id: string | null;
+  selected_bmu_id: string | null;
+  market_summary: {
+    total_settled_turndown_mwh: number;
+    total_unsettled_rebound_mwh: number;
+    rebound_leakage_pct: number;
+    implied_unsettled_comp_gbp: number;
+    non_active_mae_mwh: number;
+    non_active_bias_mwh: number;
+    counter_economic_turndown_mwh: number;
+    bl01_vtps_count: number;
+    self_nom_vtps_count: number;
+    headline: string;
+  };
+  vtps: BaselineAuditVtp[];
+  selected_detail: BaselineAuditDetail | null;
 }

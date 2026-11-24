@@ -14,6 +14,7 @@ export function SyncModal({ open, onClose, onStarted, progress }: Props) {
   const [start, setStart] = useState('2026-10-25');
   const [end, setEnd] = useState('2026-11-12');
   const [includeBmuSp, setIncludeBmuSp] = useState(true);
+  const [includeBaselines, setIncludeBaselines] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -29,6 +30,7 @@ export function SyncModal({ open, onClose, onStarted, progress }: Props) {
         start_date: start,
         end_date: end,
         include_bmu_sp: includeBmuSp,
+        include_baselines: includeBaselines,
       });
       setMsg('Ingestion started in background. Progress appears in the top bar.');
       onStarted();
@@ -107,6 +109,21 @@ export function SyncModal({ open, onClose, onStarted, progress }: Props) {
               />
               <span>
                 Include granular Primary/Secondary BMU × SP records (~5 MB/day)
+              </span>
+            </label>
+          </div>
+
+          <div className="field-group">
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={includeBaselines}
+                onChange={(e) => setIncludeBaselines(e.target.checked)}
+              />
+              <span>
+                Include Secondary BMU baselines &amp; metered demand (<span className="mono">sev</span>/
+                <span className="mono">qm</span>/<span className="mono">wmi</span>, streams{' '}
+                <span className="mono">bm-unit-level</span>)
               </span>
             </label>
           </div>
