@@ -54,7 +54,7 @@ From live Elexon SAA-I014 settlement data (`bm-unit-level` + `primary-secondary-
 
 ### Fast setup on a new PC (pre-built database — no ingest needed)
 
-A ready-made SQLite database (`2026-10-01` – `2026-11-04` granular BMU×SP + SBMU baselines, plus 2-year macro history and reference data) is published as a GitHub Release asset, so you can skip the ~13 GB Elexon download.
+A ready-made SQLite database (`2026-10-01` – `2026-11-04` granular BMU×SP + SBMU baselines, plus 2-year macro history and reference data) is included directly in the repo at **`data/vtp_analysis_db.zip`** (~84 MB), so you can skip the ~13 GB Elexon download.
 
 1. Clone the repo and install dependencies:
    ```bash
@@ -63,9 +63,10 @@ A ready-made SQLite database (`2026-10-01` – `2026-11-04` granular BMU×SP + S
    uv sync --extra dev
    cd frontend && npm install && npm run build && cd ..
    ```
-2. Download **`vtp_analysis_db.zip`** (~86 MB) from the [`data-2026-11-04` release](https://github.com/literallymatt/vtpbmuanalysis/releases/tag/data-2026-11-04).
-3. Unzip it so the file ends up at **`data/vtp_analysis.db`** (create the `data/` folder if it doesn't exist). On Windows: right-click → *Extract All*; on Mac/Linux: `unzip vtp_analysis_db.zip -d data/`.
-4. Run the dashboard (step 3 below) and open http://127.0.0.1:8000.
+2. Unzip **`data/vtp_analysis_db.zip`** into the `data/` folder so the file ends up at **`data/vtp_analysis.db`**:
+   - **Windows:** open `data\`, right-click `vtp_analysis_db.zip` → **Extract All** into `data\`.
+   - **Mac / Linux:** `unzip data/vtp_analysis_db.zip -d data/`
+3. Run the dashboard (step 3 below) and open http://127.0.0.1:8000.
 
 You can still fetch newer dates at any time from the web UI via **Fetch Elexon dates**, or with the ingest commands below.
 
