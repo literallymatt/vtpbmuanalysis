@@ -52,7 +52,25 @@ From live Elexon SAA-I014 settlement data (`bm-unit-level` + `primary-secondary-
 
 ## Quickstart
 
-### Fast setup on a new PC (pre-built database — no ingest needed)
+### Python-only Dashboard (Python 3.14 / pip only — no Node.js)
+
+Run the full interactive 6-view analytics dashboard using pure Python (`dash` + `plotly` + `httpx`) — no Node.js, npm, or FastAPI required. Tested on **Python 3.14** (and Python 3.11+).
+
+```bash
+git clone https://github.com/literallymatt/vtpbmuanalysis.git
+cd vtpbmuanalysis
+pip install -r requirements-python-only.txt
+python run_dashboard.py
+```
+
+- On first run, `run_dashboard.py` automatically extracts the bundled pre-built SQLite database (`data/vtp_analysis_db.zip` → `data/vtp_analysis.db`) if it is not already present, so no Elexon download is required.
+- Open **http://127.0.0.1:8050** in your browser.
+- Optional flags: `python run_dashboard.py --host 127.0.0.1 --port 8050` (or `python -m py_dashboard`).
+- You can also install via optional extras (`pip install -e ".[dashboard]"`) and fetch newer Elexon dates directly from the **Fetch Elexon dates** modal inside the dashboard.
+
+---
+
+### Fast setup on a new PC (FastAPI + React version — pre-built database)
 
 A ready-made SQLite database (`2026-10-01` – `2026-11-04` granular BMU×SP + SBMU baselines, plus 2-year macro history and reference data) is included directly in the repo at **`data/vtp_analysis_db.zip`** (~84 MB), so you can skip the ~13 GB Elexon download.
 
@@ -108,5 +126,9 @@ cd frontend && npm run dev
 ### 4. Run tests
 
 ```bash
+# Python-only dashboard tests (no FastAPI/Node required)
+pytest tests/test_py_dashboard.py -v
+
+# Full test suite (including FastAPI endpoints)
 uv run pytest -v
 ```
