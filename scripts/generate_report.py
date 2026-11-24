@@ -57,10 +57,27 @@ def _badge_style(cls: str) -> str:
     return "background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;"
 
 
+def _chart_commentary(why_html: str, shows_html: str) -> str:
+    """Render a two-column commentary block explaining why a chart is shown and what it shows."""
+    return f"""
+      <div class="chart-commentary">
+        <div class="commentary-col">
+          <div class="commentary-label why">Why this chart</div>
+          <p>{why_html}</p>
+        </div>
+        <div class="commentary-col">
+          <div class="commentary-label shows">What it actually shows</div>
+          <p>{shows_html}</p>
+        </div>
+      </div>
+    """
+
+
 def _svg_sp_overlay(
     sp_overlay: list[dict[str, Any]],
     title: str,
     subtitle: str,
+    commentary_html: str = "",
     width: int = 760,
     height: int = 270,
 ) -> str:
@@ -163,6 +180,7 @@ def _svg_sp_overlay(
         {''.join(x_ticks)}
         <text x="14" y="{pad_t + ph / 2:.1f}" transform="rotate(-90 14 {pad_t + ph / 2:.1f})" text-anchor="middle" font-size="10" fill="#64748b">Mean Demand (MW)</text>
       </svg>
+      {commentary_html}
     </div>
     """
 
@@ -171,6 +189,7 @@ def _svg_bl01_daily(
     daily: list[dict[str, Any]],
     title: str,
     subtitle: str,
+    commentary_html: str = "",
     width: int = 760,
     height: int = 250,
 ) -> str:
@@ -239,6 +258,7 @@ def _svg_bl01_daily(
         {''.join(ticks)}
         <text x="14" y="{pad_t + ph / 2:.1f}" transform="rotate(-90 14 {pad_t + ph / 2:.1f})" text-anchor="middle" font-size="10" fill="#64748b">Daily Demand (MWh)</text>
       </svg>
+      {commentary_html}
     </div>
     """
 
@@ -247,6 +267,7 @@ def _svg_price_regimes(
     regimes: list[dict[str, Any]],
     title: str,
     subtitle: str,
+    commentary_html: str = "",
     width: int = 760,
     height: int = 240,
 ) -> str:
@@ -311,6 +332,7 @@ def _svg_price_regimes(
         <line x1="{pad_l}" y1="{pad_t + ph}" x2="{width - pad_r}" y2="{pad_t + ph}" stroke="#94a3b8" />
         <text x="14" y="{pad_t + ph / 2:.1f}" transform="rotate(-90 14 {pad_t + ph / 2:.1f})" text-anchor="middle" font-size="10" fill="#64748b">Volume (MWh)</text>
       </svg>
+      {commentary_html}
     </div>
     """
 
@@ -319,6 +341,7 @@ def _svg_cherry_pick(
     bins: list[dict[str, Any]],
     title: str,
     subtitle: str,
+    commentary_html: str = "",
     width: int = 760,
     height: int = 235,
 ) -> str:
@@ -381,6 +404,7 @@ def _svg_cherry_pick(
         <line x1="{pad_l}" y1="{pad_t + ph}" x2="{width - pad_r}" y2="{pad_t + ph}" stroke="#94a3b8" />
         <text x="14" y="{pad_t + ph / 2:.1f}" transform="rotate(-90 14 {pad_t + ph / 2:.1f})" text-anchor="middle" font-size="10" fill="#64748b">Share of SPs (%)</text>
       </svg>
+      {commentary_html}
     </div>
     """
 
@@ -486,35 +510,159 @@ def build_report(start_date: str = "2026-10-01", end_date: str = "2026-11-04") -
         else 0.0
     )
 
+    # Dynamic metrics for per-chart commentary so every figure stays synced to live data
+    vtp_by_id = {v["party_id"]: v for v in vtps}
+    axle_v = vtp_by_id["AXLEENER"]
+    reflexi_v = vtp_by_id["REFLEXI"]
+    joulen_v = vtp_by_id["POWONTEC"]
+
+    def _window_stats(sp_rows: list[dict[str, Any]]) -> dict[str, float]:
+        off = [r for r in sp_rows if 1 <= int(r["sp"]) <= 11]
+        day = [r for r in sp_rows if 15 <= int(r["sp"]) <= 44]
+        return {
+            "off_act_mean": sum(float(r["actual_demand_mw"]) for r in off) / max(1, len(off)),
+            "off_base_mean": sum(float(r["baseline_demand_mw"]) for r in off) / max(1, len(off)),
+            "off_act_peak": max((float(r["actual_demand_mw"]) for r in off), default=0.0),
+            "day_act_mean": sum(float(r["actual_demand_mw"]) for r in day) / max(1, len(day)),
+            "day_base_mean": sum(float(r["baseline_demand_mw"]) for r in day) / max(1, len(day)),
+        }
+
+    axle_w = _window_stats(axle_d["sp_overlay"])
+    reflexi_w = _window_stats(reflexi_d["sp_overlay"])
+    joulen_w = _window_stats(joulen_d["sp_overlay"])
+
+    axle_day_ratio = axle_w["day_base_mean"] / max(0.1, axle_w["day_act_mean"])
+    axle_share_pct = float(axle_v["settled_turndown_mwh"]) / total_td * 100.0
+    axle_daily = axle_d["bl01_daily_series"]
+    axle_mean_act_d = sum(float(d["actual_demand_mwh"]) for d in axle_daily) / max(1, len(axle_daily))
+    axle_mean_sev_d = sum(float(d["settled_sev_mwh"]) for d in axle_daily) / max(1, len(axle_daily))
+    axle_daily_ratio = axle_mean_sev_d / max(0.1, axle_mean_act_d)
+    axle_first_sev = float(axle_daily[0]["settled_sev_mwh"]) if axle_daily else 0.0
+    axle_last_sev = float(axle_daily[-1]["settled_sev_mwh"]) if axle_daily else 0.0
+    axle_sel_gap = float(axle_v["active_positive_pct"]) - float(axle_v["inactive_positive_pct"])
+    axle_inact_neg = 100.0 - float(axle_v["inactive_positive_pct"])
+
+    low_regimes_td = sum(
+        float(r["settled_turndown_mwh"])
+        for r in market_regimes
+        if r["regime"] in ("< £0", "£0–£50", "£50–£106 (Below SSC)")
+    )
+    neg_regime_td = next(
+        (float(r["settled_turndown_mwh"]) for r in market_regimes if r["regime"] == "< £0"),
+        0.0,
+    )
+    high_regimes_rb = sum(
+        float(r["unsettled_rebound_mwh"])
+        for r in market_regimes
+        if r["regime"] in ("£106–£180", "> £180/MWh")
+    )
+    total_regimes_rb = sum(float(r["unsettled_rebound_mwh"]) for r in market_regimes) or 1.0
+    high_rb_share_pct = high_regimes_rb / total_regimes_rb * 100.0
+
     svg_axle_sp = _svg_sp_overlay(
         axle_d["sp_overlay"],
         "1. Axle Energy (AXLEENER) — Frozen BL01 Baseline (~2× Actual Load)",
         "Mean half-hourly actual metered demand (qm) vs settlement baseline (sev), 35-day average (MW). Active 35/35 days; +3.35 MW IDA pre-ramp.",
+        commentary_html=_chart_commentary(
+            f"Axle Energy is the largest VTP in GB by settled turn-down (<strong>{_fmt_num(axle_v['settled_turndown_mwh'], 0)} MWh</strong>, "
+            f"<strong>{axle_share_pct:.1f}%</strong> of market volume across {axle_v['sbmu_count']} SBMUs) and activates on all "
+            f"{axle_v['active_days']}/35 days. Plotting its 24-hour average actual load (<code>qm</code>) against its settlement baseline "
+            f"(<code>sev</code>) tests whether P376 BL01 remains a credible counterfactual under continuous daily dispatch.",
+            f"Through the daytime (07:00–22:00), the dashed blue baseline sits at <strong>{axle_w['day_base_mean']:.1f} MW</strong> while "
+            f"actual metered demand averages just <strong>{axle_w['day_act_mean']:.1f} MW</strong> — a <strong>{axle_day_ratio:.1f}×</strong> "
+            f"daytime gap (shaded blue) that turns nearly every active half-hour into a turn-down claim. Also visible is a "
+            f"<strong>+{_fmt_num(axle_v.get('ida_pre_ramp_mw'), 2)} MW</strong> pre-event ramp ahead of peak windows (consistent with BL01 "
+            f"In-Day Adjustment). During the 00:00–05:30 EV off-peak band, actual charging surges to <strong>{axle_w['off_act_peak']:.1f} MW</strong> "
+            f"peak ({axle_w['off_act_mean']:.1f} MW mean vs {axle_w['off_base_mean']:.1f} MW baseline), creating the red-shaded unsettled rebound "
+            f"(<strong>{_fmt_num(axle_v['unsettled_rebound_mwh'], 0)} MWh</strong>, {_fmt_gbp(axle_v['implied_unsettled_comp_gbp'])} implied SSC).",
+        ),
     )
     svg_reflexi_sp = _svg_sp_overlay(
         reflexi_d["sp_overlay"],
         "2. REFLEXI (REFLEXI) — Un-Notified Overnight EV Rebound (108.1% Leakage)",
         "~250 MW actual overnight EV charging (00:00–05:30) vs ~120 MW baseline occurs with wmi = 0, generating 26,966 MWh (£2.87M implied SSC) of unsettled rebound.",
+        commentary_html=_chart_commentary(
+            f"Smart EV charging shifts kWh rather than destroying demand: energy avoided at peak must be recharged overnight. "
+            f"REFLEXI ({reflexi_v['sbmu_count']} SBMUs, active {reflexi_v['active_days']}/35 days, "
+            f"<strong>{_fmt_num(reflexi_v['settled_turndown_mwh'], 0)} MWh</strong> settled turn-down) is shown to isolate this rebound side "
+            f"of the energy balance and quantify what happens when overnight recharge occurs while <code>wmi = 0</code>.",
+            f"Between 07:00 and 22:00, the blue turn-down gap is relatively modest ({reflexi_w['day_base_mean']:.1f} MW baseline vs "
+            f"{reflexi_w['day_act_mean']:.1f} MW actual). Inside the 00:00–05:30 off-peak window, however, actual metered demand (black) "
+            f"spikes to <strong>{reflexi_w['off_act_peak']:.1f} MW</strong> peak (<strong>{reflexi_w['off_act_mean']:.1f} MW</strong> mean) "
+            f"against a baseline of only <strong>{reflexi_w['off_base_mean']:.1f} MW</strong>. That red-shaded surge represents "
+            f"<strong>{_fmt_num(reflexi_v['unsettled_rebound_mwh'], 0)} MWh</strong> of un-notified rebound — "
+            f"<strong>{_fmt_num(reflexi_v['rebound_leakage_pct'], 1, '%')}</strong> of its total settled turn-down — leaving suppliers with "
+            f"<strong>{_fmt_gbp(reflexi_v['implied_unsettled_comp_gbp'])}</strong> in implied unsettled SSC exposure.",
+        ),
     )
     svg_joulen_sp = _svg_sp_overlay(
         joulen_d["sp_overlay"],
         "3. Joulen (POWONTEC) — 100% Quantised Self-Nominated SEV",
         "100% of submitted sev values are exact 2-decimal multiples; baseline drops to 0 MW during 00:30–05:30 off-peak while actual load runs ~18 MW.",
+        commentary_html=_chart_commentary(
+            f"BSC Issue 127 highlights that there is currently no public register disclosing whether a VTP uses P376 BL01 or a bespoke "
+            f"self-nominated baseline. Joulen ({joulen_v['sbmu_count']} SBMUs, <strong>{_fmt_num(joulen_v['settled_turndown_mwh'], 0)} MWh</strong> "
+            f"settled turn-down) is shown as a direct visual contrast to Charts 1–2 so readers can see how a self-nominated <code>sev</code> "
+            f"behaves in public SAA-I014 data.",
+            f"Rather than an organic historical load curve, <strong>{_fmt_num(joulen_v['quantised_2dp_pct'], 0, '%')}</strong> of Joulen's "
+            f"<code>sev</code> values lie on an exact 2-decimal-place grid (0.01 MWh steps) and <code>sev</code> is populated on only "
+            f"<strong>{_fmt_num(joulen_v['sev_coverage_pct'], 1, '%')}</strong> of Settlement Periods. Between 00:30 and 05:30 the dashed "
+            f"baseline collapses toward 0 MW (<strong>{joulen_w['off_base_mean']:.1f} MW</strong> off-peak mean) while actual load runs at "
+            f"<strong>{joulen_w['off_act_mean']:.1f} MW</strong> ({joulen_w['off_act_peak']:.1f} MW peak), then jumps back to a smooth "
+            f"daytime curve averaging <strong>{joulen_w['day_base_mean']:.1f} MW</strong> (peaking above 30 MW in the evening) versus "
+            f"<strong>{joulen_w['day_act_mean']:.1f} MW</strong> actual — masking off-peak rebound (just "
+            f"{_fmt_num(joulen_v['rebound_leakage_pct'], 1, '%')} headline leakage) and underscoring the need for a mandatory methodology registry.",
+        ),
     )
     svg_axle_daily = _svg_bl01_daily(
         axle_d["bl01_daily_series"],
         "4. P376 BL01 Event-Day Lookback Freeze — Axle Energy (35 Consecutive Days)",
         "Continuous activation exhausts non-event lookback days, keeping settled SEV frozen near ~3,500 MWh/day while actual demand averages ~1,800 MWh/day.",
+        commentary_html=_chart_commentary(
+            "Chart 1 shows <em>that</em> Axle Energy's baseline sits roughly double its actual load, but a 24-hour average cannot prove "
+            "<em>why</em> it fails to self-correct. This 35-day daily series tests the P376 BL01 event-day exclusion rule directly by "
+            "comparing settled <code>sev</code> (red) against actual daily demand (black) and an independent rolling BL01 counterfactual "
+            "computed <em>without</em> event-day exclusion (dashed amber).",
+            f"Because P376 excludes prior event days from the 10-working-day / middle-2-of-4-weekend lookback, activating on all 35/35 days "
+            f"prevents recent metered demand from ever entering the calculation. Settled SEV stays locked at a mean of "
+            f"<strong>{axle_mean_sev_d:,.0f} MWh/day</strong> (even rising from {axle_first_sev:,.0f} MWh on Oct 1 to "
+            f"{axle_last_sev:,.0f} MWh on Nov 4) while actual demand averages <strong>{axle_mean_act_d:,.0f} MWh/day</strong> "
+            f"(a <strong>{axle_daily_ratio:.2f}×</strong> structural gap). By contrast, the dashed amber rolling BL01 line tracks actual "
+            f"demand closely — visually isolating the exact distortion created by uncapped event-day exclusion.",
+        ),
     )
     svg_cherry = _svg_cherry_pick(
         axle_d["cherry_pick_hist"],
         "5. Asymmetric 'Free Option' Selection Distribution — Axle Energy (qm − sev)",
         "Distribution of baseline-minus-actual deviations on Active SPs (wmi > 0, blue) vs Inactive SPs (wmi = 0, grey). Positive = actual below baseline.",
+        commentary_html=_chart_commentary(
+            "Even an unbiased baseline has forecast noise: actual load randomly falls below baseline in some half-hours and above it in "
+            "others. This histogram tests the 'free option' hypothesis — whether optional one-sided notification (<code>wmi &gt; 0</code>) "
+            "allows VTPs to monetise favorable baseline errors while leaving unfavorable deviations unsettled.",
+            f"The horizontal axis shows <code>qm − sev</code> (MWh/SP), where values right of zero mean actual demand was <em>below</em> "
+            f"baseline. The blue (Active, <code>wmi &gt; 0</code>) and grey (Inactive, <code>wmi = 0</code>) distributions split sharply "
+            f"around zero: <strong>{_fmt_num(axle_v['active_positive_pct'], 1, '%')}</strong> of Active SPs are positive (extending into a "
+            f"long right tail up to +7.5 MWh/SP), whereas <strong>{axle_inact_neg:.1f}%</strong> of Inactive SPs are negative (only "
+            f"{_fmt_num(axle_v['inactive_positive_pct'], 1, '%')} positive) — a <strong>+{axle_sel_gap:.1f} pp</strong> selection gap "
+            f"(+{_fmt_num(sel_gap, 1, ' pp')} market-wide). Half-hours where load exceeds baseline are overwhelmingly left at <code>wmi = 0</code>.",
+        ),
     )
     svg_regimes = _svg_price_regimes(
         market_regimes,
         "6. Perverse Dispatch Across Wholesale Price Regimes (All Active VTPs, 35 Days)",
         f"{_fmt_num(ms['counter_economic_turndown_mwh'], 0)} MWh ({counter_econ_pct:.1f}%) of settled turn-down occurred when System Buy Price (SBP) was below Supplier Sourcing Cost (SSC).",
+        commentary_html=_chart_commentary(
+            "The central economic test for P510 is whether P415 compensation directs demand turn-down toward genuine system scarcity. "
+            "Grouping all 35 days of market-wide settled turn-down (blue) and un-notified rebound (red) into five System Buy Price "
+            "(<code>SBP</code>) buckets relative to the ~£106/MWh Supplier Sourcing Cost (<code>SSC</code>) reveals whether fixed "
+            "retail-referenced payments distort wholesale dispatch.",
+            f"Although most turn-down sits in the £106–£180 and &gt;£180/MWh scarcity buckets, <strong>{low_regimes_td:,.0f} MWh "
+            f"({counter_econ_pct:.1f}%)</strong> was still claimed across the three left-hand regimes where <code>SBP &lt; SSC</code> — "
+            f"including <strong>{neg_regime_td:,.0f} MWh</strong> during negative-price (<code>&lt; £0</code>) surplus periods when cutting "
+            f"demand is counter-economic. Equally important, red un-notified rebound bars appear in every bucket: "
+            f"<strong>{high_rb_share_pct:.1f}%</strong> ({high_regimes_rb:,.0f} MWh) of unsettled rebound actually occurs during "
+            f"high-price periods (<code>SBP ≥ £106/MWh</code>), contradicting the assumption that rebound is harmlessly confined to cheap overnight hours.",
+        ),
     )
 
     return f"""<!DOCTYPE html>
@@ -678,6 +826,77 @@ def build_report(start_date: str = "2026-10-01", end_date: str = "2026-11-04") -
   .legend span {{ display: inline-flex; align-items: center; gap: 6px; }}
   .legend i {{ display: inline-block; width: 12px; height: 8px; border-radius: 2px; }}
   .chart-svg {{ width: 100%; height: auto; display: block; }}
+  .chart-commentary {{
+    display: grid;
+    grid-template-columns: 1fr 1.35fr;
+    gap: 16px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #f1f5f9;
+  }}
+  .commentary-col {{
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 10px 13px;
+  }}
+  .commentary-label {{
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 4px;
+  }}
+  .commentary-label.why {{ color: #1d4ed8; }}
+  .commentary-label.shows {{ color: #0f172a; }}
+  .commentary-col p {{
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--ink-2);
+  }}
+  .commentary-col code {{
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 4px;
+    padding: 0 4px;
+    color: var(--ink);
+  }}
+  .section-intro {{
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 13px 16px;
+    margin: 0 0 18px;
+    font-size: 13px;
+    color: var(--ink-2);
+  }}
+  .section-intro p {{ margin: 0 0 8px; }}
+  .section-intro p:last-child {{ margin-bottom: 0; }}
+  .guide-list {{
+    margin: 6px 0 0;
+    padding-left: 18px;
+    font-size: 12.5px;
+    color: var(--ink-2);
+  }}
+  .guide-list li {{ margin-bottom: 4px; }}
+  .guide-list li:last-child {{ margin-bottom: 0; }}
+  .table-note {{
+    margin: -10px 0 22px;
+    padding: 10px 14px;
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--ink-2);
+    line-height: 1.5;
+  }}
+  .table-note code {{
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+  }}
   .table-wrap {{
     background: var(--surface);
     border: 1px solid var(--border);
@@ -767,12 +986,18 @@ def build_report(start_date: str = "2026-10-01", end_date: str = "2026-11-04") -
   @media (max-width: 820px) {{
     .kpi-strip {{ grid-template-columns: repeat(2, 1fr); }}
     .policy-grid {{ grid-template-columns: 1fr; }}
+    .chart-commentary {{ grid-template-columns: 1fr; }}
   }}
   @media print {{
     body {{ background: #ffffff; font-size: 11.5px; }}
     .page {{ padding: 0; max-width: 100%; }}
     .hero {{ border-radius: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
-    .kpi-strip, .chart-card, .table-wrap, .policy-box {{ break-inside: avoid; }}
+    h2 {{ break-after: avoid; page-break-after: avoid; }}
+    .kpi-strip, .chart-card, .table-wrap, .policy-box, .section-intro, .table-note {{ break-inside: avoid; }}
+    .table-wrap {{ overflow: visible; }}
+    table {{ font-size: 9.5px; }}
+    th, td {{ padding: 6px 6px; }}
+    .badge {{ font-size: 9px; padding: 1px 6px; }}
   }}
 </style>
 </head>
@@ -831,6 +1056,19 @@ def build_report(start_date: str = "2026-10-01", end_date: str = "2026-11-04") -
   </div>
 
   <h2>1. Visual Evidence: Baseline vs Actual Metered Demand &amp; Perverse Incentives</h2>
+  <div class="section-intro">
+    <p>
+      <strong>How to read these six charts:</strong> Each chart below is chosen to isolate one link in the empirical chain
+      connecting P376/P415 settlement rules to observed market outcomes. Together they move from concrete portfolio behaviour
+      to the underlying mathematical mechanism and its market-wide economic impact:
+    </p>
+    <ul class="guide-list">
+      <li><strong>Charts 1–3 (Portfolio Archetypes):</strong> Compare three contrasting VTPs on the same 24-hour actual-load (<code>qm</code>) vs settlement-baseline (<code>sev</code>) scale — isolating frozen daytime BL01 inflation (Axle Energy), un-notified overnight EV rebound (REFLEXI), and quantised self-nominated SEVs (Joulen).</li>
+      <li><strong>Chart 4 (Mechanism):</strong> Zooms out to a 35-day daily series for Axle Energy to show <em>how</em> P376's event-day exclusion rule mathematically locks baselines above actual load.</li>
+      <li><strong>Chart 5 (Incentive Test):</strong> Tests the "free option" hypothesis statistically by comparing baseline error distributions on notified (<code>wmi &gt; 0</code>) versus un-notified (<code>wmi = 0</code>) Settlement Periods.</li>
+      <li><strong>Chart 6 (Wholesale Impact):</strong> Aggregates all active VTPs by System Buy Price (<code>SBP</code>) regime to test whether dispatch aligns with genuine system scarcity relative to Supplier Sourcing Cost (<code>SSC</code>).</li>
+    </ul>
+  </div>
   {svg_axle_sp}
   {svg_reflexi_sp}
   {svg_joulen_sp}
@@ -863,6 +1101,12 @@ def build_report(start_date: str = "2026-10-01", end_date: str = "2026-11-04") -
       </tbody>
     </table>
   </div>
+  <div class="table-note">
+    <strong>Reading the scorecard:</strong> <em>Unsettled Rebound</em> measures MWh where actual load exceeded baseline during inactive SPs
+    (<code>wmi = 0</code>); <em>Implied SSC</em> values that omitted rebound at each SP's Supplier Sourcing Cost. <em>Non-Act MAE</em> is
+    mean absolute baseline error (MWh/SP) on inactive periods; <em>BL01 R²</em> measures fit against an independent P376 BL01 reconstruction;
+    and <em>2dp / Cov</em> flags self-nominated baselines (high % exact 2-decimal values or sparse SP coverage).
+  </div>
 
   <h2>3. Mutualised Supplier Compensation Transfers ({start_date} – {end_date})</h2>
   <p style="margin:0 0 10px;color:var(--ink-2)">
@@ -887,6 +1131,13 @@ def build_report(start_date: str = "2026-10-01", end_date: str = "2026-11-04") -
         {''.join(supplier_rows_html)}
       </tbody>
     </table>
+  </div>
+  <div class="table-note">
+    <strong>Why this transfer occurs:</strong> Under P415, compensation paid to a supplier for VTP turn-down on its customers' meters
+    (<code>sccp</code>) is funded via a mutualised levy across all GB suppliers in proportion to total demand (<code>scvp</code>).
+    <em>Net Transfer</em> = <code>sccp − scvp</code>; <em>Over-Index</em> is a supplier's share of compensation divided by its share of
+    GB demand (1.00× = neutral). Because VTP activity is concentrated on EV-tariff domestic suppliers, non-EV and commercial suppliers
+    systematically subsidise those compensation flows.
   </div>
 
   <h2>4. Structural Policy Implications for P376 (BL01), Issue 127 &amp; P510</h2>

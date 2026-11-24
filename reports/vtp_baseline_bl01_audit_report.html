@@ -159,6 +159,77 @@
   .legend span { display: inline-flex; align-items: center; gap: 6px; }
   .legend i { display: inline-block; width: 12px; height: 8px; border-radius: 2px; }
   .chart-svg { width: 100%; height: auto; display: block; }
+  .chart-commentary {
+    display: grid;
+    grid-template-columns: 1fr 1.35fr;
+    gap: 16px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #f1f5f9;
+  }
+  .commentary-col {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 10px 13px;
+  }
+  .commentary-label {
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 4px;
+  }
+  .commentary-label.why { color: #1d4ed8; }
+  .commentary-label.shows { color: #0f172a; }
+  .commentary-col p {
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--ink-2);
+  }
+  .commentary-col code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 4px;
+    padding: 0 4px;
+    color: var(--ink);
+  }
+  .section-intro {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 13px 16px;
+    margin: 0 0 18px;
+    font-size: 13px;
+    color: var(--ink-2);
+  }
+  .section-intro p { margin: 0 0 8px; }
+  .section-intro p:last-child { margin-bottom: 0; }
+  .guide-list {
+    margin: 6px 0 0;
+    padding-left: 18px;
+    font-size: 12.5px;
+    color: var(--ink-2);
+  }
+  .guide-list li { margin-bottom: 4px; }
+  .guide-list li:last-child { margin-bottom: 0; }
+  .table-note {
+    margin: -10px 0 22px;
+    padding: 10px 14px;
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--ink-2);
+    line-height: 1.5;
+  }
+  .table-note code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+  }
   .table-wrap {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -248,12 +319,18 @@
   @media (max-width: 820px) {
     .kpi-strip { grid-template-columns: repeat(2, 1fr); }
     .policy-grid { grid-template-columns: 1fr; }
+    .chart-commentary { grid-template-columns: 1fr; }
   }
   @media print {
     body { background: #ffffff; font-size: 11.5px; }
     .page { padding: 0; max-width: 100%; }
     .hero { border-radius: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .kpi-strip, .chart-card, .table-wrap, .policy-box { break-inside: avoid; }
+    h2 { break-after: avoid; page-break-after: avoid; }
+    .kpi-strip, .chart-card, .table-wrap, .policy-box, .section-intro, .table-note { break-inside: avoid; }
+    .table-wrap { overflow: visible; }
+    table { font-size: 9.5px; }
+    th, td { padding: 6px 6px; }
+    .badge { font-size: 9px; padding: 1px 6px; }
   }
 </style>
 </head>
@@ -272,7 +349,7 @@
       <span>Window: 2026-10-01 to 2026-11-04 (35 consecutive days)</span>
       <span>SBMU×SP Rows: 647,682</span>
       <span>Active VTPs: 12 (10 BL01 / 3 Self-Nominated)</span>
-      <span>Generated: 2026-11-24 20:50 UTC</span>
+      <span>Generated: 2026-11-24 21:28 UTC</span>
     </div>
   </header>
 
@@ -312,6 +389,19 @@
   </div>
 
   <h2>1. Visual Evidence: Baseline vs Actual Metered Demand &amp; Perverse Incentives</h2>
+  <div class="section-intro">
+    <p>
+      <strong>How to read these six charts:</strong> Each chart below is chosen to isolate one link in the empirical chain
+      connecting P376/P415 settlement rules to observed market outcomes. Together they move from concrete portfolio behaviour
+      to the underlying mathematical mechanism and its market-wide economic impact:
+    </p>
+    <ul class="guide-list">
+      <li><strong>Charts 1–3 (Portfolio Archetypes):</strong> Compare three contrasting VTPs on the same 24-hour actual-load (<code>qm</code>) vs settlement-baseline (<code>sev</code>) scale — isolating frozen daytime BL01 inflation (Axle Energy), un-notified overnight EV rebound (REFLEXI), and quantised self-nominated SEVs (Joulen).</li>
+      <li><strong>Chart 4 (Mechanism):</strong> Zooms out to a 35-day daily series for Axle Energy to show <em>how</em> P376's event-day exclusion rule mathematically locks baselines above actual load.</li>
+      <li><strong>Chart 5 (Incentive Test):</strong> Tests the "free option" hypothesis statistically by comparing baseline error distributions on notified (<code>wmi &gt; 0</code>) versus un-notified (<code>wmi = 0</code>) Settlement Periods.</li>
+      <li><strong>Chart 6 (Wholesale Impact):</strong> Aggregates all active VTPs by System Buy Price (<code>SBP</code>) regime to test whether dispatch aligns with genuine system scarcity relative to Supplier Sourcing Cost (<code>SSC</code>).</li>
+    </ul>
+  </div>
   
     <div class="chart-card">
       <div class="chart-head">
@@ -336,6 +426,18 @@
         <line x1="58.0" y1="232" x2="58.0" y2="236" stroke="#94a3b8" /><text x="58.0" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">00:00</text><line x1="144.8" y1="232" x2="144.8" y2="236" stroke="#94a3b8" /><text x="144.8" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">03:00</text><line x1="217.1" y1="232" x2="217.1" y2="236" stroke="#94a3b8" /><text x="217.1" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">05:30</text><line x1="318.4" y1="232" x2="318.4" y2="236" stroke="#94a3b8" /><text x="318.4" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">09:00</text><line x1="405.2" y1="232" x2="405.2" y2="236" stroke="#94a3b8" /><text x="405.2" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">12:00</text><line x1="492.0" y1="232" x2="492.0" y2="236" stroke="#94a3b8" /><text x="492.0" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">15:00</text><line x1="578.9" y1="232" x2="578.9" y2="236" stroke="#94a3b8" /><text x="578.9" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">18:00</text><line x1="665.7" y1="232" x2="665.7" y2="236" stroke="#94a3b8" /><text x="665.7" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">21:00</text><line x1="738.0" y1="232" x2="738.0" y2="236" stroke="#94a3b8" /><text x="738.0" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">23:30</text>
         <text x="14" y="131.0" transform="rotate(-90 14 131.0)" text-anchor="middle" font-size="10" fill="#64748b">Mean Demand (MW)</text>
       </svg>
+      
+      <div class="chart-commentary">
+        <div class="commentary-col">
+          <div class="commentary-label why">Why this chart</div>
+          <p>Axle Energy is the largest VTP in GB by settled turn-down (<strong>65,829 MWh</strong>, <strong>45.3%</strong> of market volume across 29 SBMUs) and activates on all 35/35 days. Plotting its 24-hour average actual load (<code>qm</code>) against its settlement baseline (<code>sev</code>) tests whether P376 BL01 remains a credible counterfactual under continuous daily dispatch.</p>
+        </div>
+        <div class="commentary-col">
+          <div class="commentary-label shows">What it actually shows</div>
+          <p>Through the daytime (07:00–22:00), the dashed blue baseline sits at <strong>149.1 MW</strong> while actual metered demand averages just <strong>40.4 MW</strong> — a <strong>3.7×</strong> daytime gap (shaded blue) that turns nearly every active half-hour into a turn-down claim. Also visible is a <strong>+3.35 MW</strong> pre-event ramp ahead of peak windows (consistent with BL01 In-Day Adjustment). During the 00:00–05:30 EV off-peak band, actual charging surges to <strong>164.7 MW</strong> peak (131.9 MW mean vs 109.4 MW baseline), creating the red-shaded unsettled rebound (<strong>6,818 MWh</strong>, £725.9k implied SSC).</p>
+        </div>
+      </div>
+    
     </div>
     
   
@@ -362,6 +464,18 @@
         <line x1="58.0" y1="232" x2="58.0" y2="236" stroke="#94a3b8" /><text x="58.0" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">00:00</text><line x1="144.8" y1="232" x2="144.8" y2="236" stroke="#94a3b8" /><text x="144.8" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">03:00</text><line x1="217.1" y1="232" x2="217.1" y2="236" stroke="#94a3b8" /><text x="217.1" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">05:30</text><line x1="318.4" y1="232" x2="318.4" y2="236" stroke="#94a3b8" /><text x="318.4" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">09:00</text><line x1="405.2" y1="232" x2="405.2" y2="236" stroke="#94a3b8" /><text x="405.2" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">12:00</text><line x1="492.0" y1="232" x2="492.0" y2="236" stroke="#94a3b8" /><text x="492.0" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">15:00</text><line x1="578.9" y1="232" x2="578.9" y2="236" stroke="#94a3b8" /><text x="578.9" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">18:00</text><line x1="665.7" y1="232" x2="665.7" y2="236" stroke="#94a3b8" /><text x="665.7" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">21:00</text><line x1="738.0" y1="232" x2="738.0" y2="236" stroke="#94a3b8" /><text x="738.0" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">23:30</text>
         <text x="14" y="131.0" transform="rotate(-90 14 131.0)" text-anchor="middle" font-size="10" fill="#64748b">Mean Demand (MW)</text>
       </svg>
+      
+      <div class="chart-commentary">
+        <div class="commentary-col">
+          <div class="commentary-label why">Why this chart</div>
+          <p>Smart EV charging shifts kWh rather than destroying demand: energy avoided at peak must be recharged overnight. REFLEXI (28 SBMUs, active 35/35 days, <strong>24,949 MWh</strong> settled turn-down) is shown to isolate this rebound side of the energy balance and quantify what happens when overnight recharge occurs while <code>wmi = 0</code>.</p>
+        </div>
+        <div class="commentary-col">
+          <div class="commentary-label shows">What it actually shows</div>
+          <p>Between 07:00 and 22:00, the blue turn-down gap is relatively modest (126.6 MW baseline vs 106.0 MW actual). Inside the 00:00–05:30 off-peak window, however, actual metered demand (black) spikes to <strong>246.2 MW</strong> peak (<strong>209.3 MW</strong> mean) against a baseline of only <strong>115.8 MW</strong>. That red-shaded surge represents <strong>26,966 MWh</strong> of un-notified rebound — <strong>108.1%</strong> of its total settled turn-down — leaving suppliers with <strong>£2.87M</strong> in implied unsettled SSC exposure.</p>
+        </div>
+      </div>
+    
     </div>
     
   
@@ -388,6 +502,18 @@
         <line x1="58.0" y1="232" x2="58.0" y2="236" stroke="#94a3b8" /><text x="58.0" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">00:00</text><line x1="144.8" y1="232" x2="144.8" y2="236" stroke="#94a3b8" /><text x="144.8" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">03:00</text><line x1="217.1" y1="232" x2="217.1" y2="236" stroke="#94a3b8" /><text x="217.1" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">05:30</text><line x1="318.4" y1="232" x2="318.4" y2="236" stroke="#94a3b8" /><text x="318.4" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">09:00</text><line x1="405.2" y1="232" x2="405.2" y2="236" stroke="#94a3b8" /><text x="405.2" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">12:00</text><line x1="492.0" y1="232" x2="492.0" y2="236" stroke="#94a3b8" /><text x="492.0" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">15:00</text><line x1="578.9" y1="232" x2="578.9" y2="236" stroke="#94a3b8" /><text x="578.9" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">18:00</text><line x1="665.7" y1="232" x2="665.7" y2="236" stroke="#94a3b8" /><text x="665.7" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">21:00</text><line x1="738.0" y1="232" x2="738.0" y2="236" stroke="#94a3b8" /><text x="738.0" y="249" text-anchor="middle" font-size="10" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">23:30</text>
         <text x="14" y="131.0" transform="rotate(-90 14 131.0)" text-anchor="middle" font-size="10" fill="#64748b">Mean Demand (MW)</text>
       </svg>
+      
+      <div class="chart-commentary">
+        <div class="commentary-col">
+          <div class="commentary-label why">Why this chart</div>
+          <p>BSC Issue 127 highlights that there is currently no public register disclosing whether a VTP uses P376 BL01 or a bespoke self-nominated baseline. Joulen (35 SBMUs, <strong>6,234 MWh</strong> settled turn-down) is shown as a direct visual contrast to Charts 1–2 so readers can see how a self-nominated <code>sev</code> behaves in public SAA-I014 data.</p>
+        </div>
+        <div class="commentary-col">
+          <div class="commentary-label shows">What it actually shows</div>
+          <p>Rather than an organic historical load curve, <strong>100%</strong> of Joulen's <code>sev</code> values lie on an exact 2-decimal-place grid (0.01 MWh steps) and <code>sev</code> is populated on only <strong>68.4%</strong> of Settlement Periods. Between 00:30 and 05:30 the dashed baseline collapses toward 0 MW (<strong>3.6 MW</strong> off-peak mean) while actual load runs at <strong>14.5 MW</strong> (17.9 MW peak), then jumps back to a smooth daytime curve averaging <strong>18.3 MW</strong> (peaking above 30 MW in the evening) versus <strong>8.3 MW</strong> actual — masking off-peak rebound (just 0.1% headline leakage) and underscoring the need for a mandatory methodology registry.</p>
+        </div>
+      </div>
+    
     </div>
     
   
@@ -412,6 +538,18 @@
         <text x="62.0" y="229" text-anchor="middle" font-size="9.5" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">10-01</text><text x="161.4" y="229" text-anchor="middle" font-size="9.5" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">10-06</text><text x="260.8" y="229" text-anchor="middle" font-size="9.5" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">10-11</text><text x="360.2" y="229" text-anchor="middle" font-size="9.5" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">10-16</text><text x="459.6" y="229" text-anchor="middle" font-size="9.5" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">10-21</text><text x="559.1" y="229" text-anchor="middle" font-size="9.5" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">10-26</text><text x="658.5" y="229" text-anchor="middle" font-size="9.5" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">10-31</text>
         <text x="14" y="119.0" transform="rotate(-90 14 119.0)" text-anchor="middle" font-size="10" fill="#64748b">Daily Demand (MWh)</text>
       </svg>
+      
+      <div class="chart-commentary">
+        <div class="commentary-col">
+          <div class="commentary-label why">Why this chart</div>
+          <p>Chart 1 shows <em>that</em> Axle Energy's baseline sits roughly double its actual load, but a 24-hour average cannot prove <em>why</em> it fails to self-correct. This 35-day daily series tests the P376 BL01 event-day exclusion rule directly by comparing settled <code>sev</code> (red) against actual daily demand (black) and an independent rolling BL01 counterfactual computed <em>without</em> event-day exclusion (dashed amber).</p>
+        </div>
+        <div class="commentary-col">
+          <div class="commentary-label shows">What it actually shows</div>
+          <p>Because P376 excludes prior event days from the 10-working-day / middle-2-of-4-weekend lookback, activating on all 35/35 days prevents recent metered demand from ever entering the calculation. Settled SEV stays locked at a mean of <strong>3,284 MWh/day</strong> (even rising from 2,993 MWh on Oct 1 to 3,710 MWh on Nov 4) while actual demand averages <strong>1,531 MWh/day</strong> (a <strong>2.15×</strong> structural gap). By contrast, the dashed amber rolling BL01 line tracks actual demand closely — visually isolating the exact distortion created by uncapped event-day exclusion.</p>
+        </div>
+      </div>
+    
     </div>
     
   
@@ -432,6 +570,18 @@
         <line x1="52" y1="195" x2="740" y2="195" stroke="#94a3b8" />
         <text x="14" y="110.5" transform="rotate(-90 14 110.5)" text-anchor="middle" font-size="10" fill="#64748b">Share of SPs (%)</text>
       </svg>
+      
+      <div class="chart-commentary">
+        <div class="commentary-col">
+          <div class="commentary-label why">Why this chart</div>
+          <p>Even an unbiased baseline has forecast noise: actual load randomly falls below baseline in some half-hours and above it in others. This histogram tests the 'free option' hypothesis — whether optional one-sided notification (<code>wmi &gt; 0</code>) allows VTPs to monetise favorable baseline errors while leaving unfavorable deviations unsettled.</p>
+        </div>
+        <div class="commentary-col">
+          <div class="commentary-label shows">What it actually shows</div>
+          <p>The horizontal axis shows <code>qm − sev</code> (MWh/SP), where values right of zero mean actual demand was <em>below</em> baseline. The blue (Active, <code>wmi &gt; 0</code>) and grey (Inactive, <code>wmi = 0</code>) distributions split sharply around zero: <strong>99.4%</strong> of Active SPs are positive (extending into a long right tail up to +7.5 MWh/SP), whereas <strong>68.3%</strong> of Inactive SPs are negative (only 31.7% positive) — a <strong>+67.7 pp</strong> selection gap (+63.6 pp market-wide). Half-hours where load exceeds baseline are overwhelmingly left at <code>wmi = 0</code>.</p>
+        </div>
+      </div>
+    
     </div>
     
   
@@ -452,6 +602,18 @@
         <line x1="64" y1="196" x2="740" y2="196" stroke="#94a3b8" />
         <text x="14" y="111.0" transform="rotate(-90 14 111.0)" text-anchor="middle" font-size="10" fill="#64748b">Volume (MWh)</text>
       </svg>
+      
+      <div class="chart-commentary">
+        <div class="commentary-col">
+          <div class="commentary-label why">Why this chart</div>
+          <p>The central economic test for P510 is whether P415 compensation directs demand turn-down toward genuine system scarcity. Grouping all 35 days of market-wide settled turn-down (blue) and un-notified rebound (red) into five System Buy Price (<code>SBP</code>) buckets relative to the ~£106/MWh Supplier Sourcing Cost (<code>SSC</code>) reveals whether fixed retail-referenced payments distort wholesale dispatch.</p>
+        </div>
+        <div class="commentary-col">
+          <div class="commentary-label shows">What it actually shows</div>
+          <p>Although most turn-down sits in the £106–£180 and &gt;£180/MWh scarcity buckets, <strong>15,688 MWh (10.8%)</strong> was still claimed across the three left-hand regimes where <code>SBP &lt; SSC</code> — including <strong>681 MWh</strong> during negative-price (<code>&lt; £0</code>) surplus periods when cutting demand is counter-economic. Equally important, red un-notified rebound bars appear in every bucket: <strong>77.8%</strong> (46,518 MWh) of unsettled rebound actually occurs during high-price periods (<code>SBP ≥ £106/MWh</code>), contradicting the assumption that rebound is harmlessly confined to cheap overnight hours.</p>
+        </div>
+      </div>
+    
     </div>
     
 
@@ -601,6 +763,12 @@
       </tbody>
     </table>
   </div>
+  <div class="table-note">
+    <strong>Reading the scorecard:</strong> <em>Unsettled Rebound</em> measures MWh where actual load exceeded baseline during inactive SPs
+    (<code>wmi = 0</code>); <em>Implied SSC</em> values that omitted rebound at each SP's Supplier Sourcing Cost. <em>Non-Act MAE</em> is
+    mean absolute baseline error (MWh/SP) on inactive periods; <em>BL01 R²</em> measures fit against an independent P376 BL01 reconstruction;
+    and <em>2dp / Cov</em> flags self-nominated baselines (high % exact 2-decimal values or sparse SP coverage).
+  </div>
 
   <h2>3. Mutualised Supplier Compensation Transfers (2026-10-01 – 2026-11-04)</h2>
   <p style="margin:0 0 10px;color:var(--ink-2)">
@@ -675,6 +843,13 @@
             
       </tbody>
     </table>
+  </div>
+  <div class="table-note">
+    <strong>Why this transfer occurs:</strong> Under P415, compensation paid to a supplier for VTP turn-down on its customers' meters
+    (<code>sccp</code>) is funded via a mutualised levy across all GB suppliers in proportion to total demand (<code>scvp</code>).
+    <em>Net Transfer</em> = <code>sccp − scvp</code>; <em>Over-Index</em> is a supplier's share of compensation divided by its share of
+    GB demand (1.00× = neutral). Because VTP activity is concentrated on EV-tariff domestic suppliers, non-EV and commercial suppliers
+    systematically subsidise those compensation flows.
   </div>
 
   <h2>4. Structural Policy Implications for P376 (BL01), Issue 127 &amp; P510</h2>
