@@ -73,6 +73,411 @@ def _chart_commentary(why_html: str, shows_html: str) -> str:
     """
 
 
+def _fetch_party_raw_sp_series(
+    conn: Any,
+    start_date: str,
+    end_date: str,
+    sec_party_id: str = "AXLEENER",
+) -> dict[str, Any]:
+    """Fetch unaggregated portfolio half-hourly slots and sub-fleet rebound stats for a VTP."""
+    rows = conn.execute(
+        """
+        SELECT settlement_date,
+               sp,
+               SUM(-qm) * 2.0 AS actual_mw,
+               SUM(-sev) * 2.0 AS baseline_mw,
+               SUM(CASE WHEN ABS(wmi) > 1e-9 THEN 1 ELSE 0 END) AS active_bmus,
+               COUNT(*) AS total_bmus
+        FROM sbmu_baseline_sp
+        WHERE sec_party_id = ?
+          AND settlement_date BETWEEN ? AND ?
+        GROUP BY settlement_date, sp
+        ORDER BY settlement_date, sp
+        """,
+        (sec_party_id, start_date, end_date),
+    ).fetchall()
+
+    slots: list[dict[str, Any]] = []
+    for r in rows:
+        d = str(r["settlement_date"])
+        sp = int(r["sp"])
+        act = float(r["actual_mw"] or 0.0)
+        base = float(r["baseline_mw"] or 0.0)
+        act_bmus = int(r["active_bmus"] or 0)
+        tot_bmus = int(r["total_bmus"] or 0)
+        slots.append(
+            {
+                "date": d,
+                "sp": sp,
+                "actual_mw": act,
+                "baseline_mw": base,
+                "gap_mw": base - act,
+                "active_bmus": act_bmus,
+                "total_bmus": tot_bmus,
+                "is_inactive": act_bmus == 0,
+            }
+        )
+
+    # Sub-fleet (*001 vs *002/*003) rebound cancellation stats
+    sf_rows = conn.execute(
+        """
+        SELECT CASE WHEN sec_bmu_id LIKE '%001' THEN '001' ELSE 'other' END AS fleet,
+               COUNT(DISTINCT sec_bmu_id) AS n_bmus,
+               SUM(CASE WHEN ABS(wmi) <= 1e-9 AND ABS(sev) > 1e-6 AND (qm - sev) < 0
+                        THEN -(qm - sev) ELSE 0 END) AS sbmu_rebound_mwh
+        FROM sbmu_baseline_sp
+        WHERE sec_party_id = ?
+          AND settlement_date BETWEEN ? AND ?
+        GROUP BY fleet
+        """,
+        (sec_party_id, start_date, end_date),
+    ).fetchall()
+    subfleets = {str(r["fleet"]): {"n_bmus": int(r["n_bmus"]), "rebound_mwh": float(r["sbmu_rebound_mwh"] or 0.0)} for r in sf_rows}
+    sbmu_total_reb = sum(v["rebound_mwh"] for v in subfleets.values())
+    port_net_reb = sum(max(0.0, -s["gap_mw"]) * 0.5 for s in slots)
+    sbmu_cancel_mwh = max(0.0, sbmu_total_reb - port_net_reb)
+    sbmu_cancel_pct = (sbmu_cancel_mwh / sbmu_total_reb * 100.0) if sbmu_total_reb > 0 else 0.0
+
+    # Quantify within-SP sign cancellation across days (e.g. SP 10)
+    by_sp: dict[int, list[float]] = {}
+    for s in slots:
+        if s["sp"] <= 48:
+            by_sp.setdefault(s["sp"], []).append(s["gap_mw"])
+    sp10_gaps = by_sp.get(10, [])
+    sp10_abs = sum(abs(g) for g in sp10_gaps)
+    sp10_net = abs(sum(sp10_gaps))
+    sp10_cancel_pct = ((1.0 - sp10_net / sp10_abs) * 100.0) if sp10_abs > 0 else 0.0
+
+    return {
+        "slots": slots,
+        "subfleets": subfleets,
+        "sbmu_total_rebound_mwh": sbmu_total_reb,
+        "sbmu_cancel_mwh": sbmu_cancel_mwh,
+        "sbmu_cancel_pct": sbmu_cancel_pct,
+        "sp10_cancel_pct": sp10_cancel_pct,
+        "sp10_min": min(sp10_gaps) if sp10_gaps else 0.0,
+        "sp10_max": max(sp10_gaps) if sp10_gaps else 0.0,
+    }
+
+
+def _interp_rgb(c0: tuple[int, int, int], c1: tuple[int, int, int], t: float) -> str:
+    t = max(0.0, min(1.0, t))
+    r = int(round(c0[0] + (c1[0] - c0[0]) * t))
+    g = int(round(c0[1] + (c1[1] - c0[1]) * t))
+    b = int(round(c0[2] + (c1[2] - c0[2]) * t))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _diverging_gap_color(gap_mw: float, min_neg: float = -75.0, max_pos: float = 165.0) -> str:
+    """Map SEV - Actual (MW) to diverging red (rebound) -> neutral -> blue (turn-down gap)."""
+    neutral = (248, 250, 252)  # #f8fafc
+    if gap_mw < 0.0:
+        t = min(1.0, abs(gap_mw) / max(1.0, abs(min_neg))) ** 0.85
+        if t < 0.5:
+            return _interp_rgb(neutral, (248, 113, 113), t * 2.0)  # -> #f87171
+        return _interp_rgb((248, 113, 113), (153, 27, 27), (t - 0.5) * 2.0)  # -> #991b1b
+    t = min(1.0, gap_mw / max(1.0, max_pos)) ** 0.85
+    if t < 0.5:
+        return _interp_rgb(neutral, (96, 165, 250), t * 2.0)  # -> #60a5fa
+    return _interp_rgb((96, 165, 250), (30, 58, 138), (t - 0.5) * 2.0)  # -> #1e3a8a
+
+
+def _svg_axle_unaggregated(
+    raw_slots: list[dict[str, Any]],
+    title: str,
+    subtitle: str,
+    commentary_html: str = "",
+    width: int = 760,
+    height: int = 532,
+) -> str:
+    """Render a stacked 2-panel unaggregated SVG for Axle Energy (all 1,682 raw SPs + 35x48 gap heatmap)."""
+    if not raw_slots:
+        return "<p>No raw half-hourly data available.</p>"
+
+    pad_l, pad_r = 56, 16
+    pw = width - pad_l - pad_r
+    n_slots = len(raw_slots)
+
+    # ---- Panel A: Full 35-day half-hourly time series (1,682 raw slots) ----
+    a_top, a_bot = 28, 202
+    a_h = a_bot - a_top
+
+    max_mw_raw = max(
+        max((s["baseline_mw"] for s in raw_slots), default=1.0),
+        max((s["actual_mw"] for s in raw_slots), default=1.0),
+        100.0,
+    )
+    max_y = max(250.0, (int(max_mw_raw // 50) + 1) * 50.0)
+
+    def x_slot(i: int) -> float:
+        return pad_l + (i / max(1, n_slots - 1)) * pw
+
+    def y_mw(v: float) -> float:
+        return a_top + a_h - (max(0.0, v) / max_y) * a_h
+
+    # Date span indices for weekend bands and X ticks
+    dates_ordered: list[str] = []
+    date_bounds: dict[str, list[int]] = {}
+    for i, s in enumerate(raw_slots):
+        d = s["date"]
+        if d not in date_bounds:
+            dates_ordered.append(d)
+            date_bounds[d] = [i, i]
+        else:
+            date_bounds[d][1] = i
+
+    weekend_bands: list[str] = []
+    for d in dates_ordered:
+        if dt.date.fromisoformat(d).weekday() >= 5:
+            i0, i1 = date_bounds[d]
+            x0 = x_slot(i0)
+            x1 = x_slot(min(n_slots - 1, i1 + 1))
+            weekend_bands.append(
+                f'<rect x="{x0:.1f}" y="{a_top}" width="{max(1.0, x1 - x0):.1f}" height="{a_h}" fill="#f1f5f9" />'
+            )
+
+    # Panel A horizontal gridlines (every 50 MW)
+    a_grid: list[str] = []
+    step_y = 50.0
+    gv = 0.0
+    while gv <= max_y + 0.1:
+        gy = y_mw(gv)
+        a_grid.append(
+            f'<line x1="{pad_l}" y1="{gy:.1f}" x2="{width - pad_r}" y2="{gy:.1f}" stroke="#e2e8f0" stroke-width="0.9" />'
+            f'<text x="{pad_l - 7}" y="{gy + 3.5:.1f}" text-anchor="end" font-size="9.5" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">{gv:,.0f}</text>'
+        )
+        gv += step_y
+
+    # Shaded gap areas (two exact closed polygons: blue where SEV > Actual, red where Actual > SEV)
+    xs = [x_slot(i) for i in range(n_slots)]
+    ys_base = [y_mw(s["baseline_mw"]) for s in raw_slots]
+    ys_act = [y_mw(s["actual_mw"]) for s in raw_slots]
+    ys_top = [min(yb, ya) for yb, ya in zip(ys_base, ys_act)]  # SVG y: smaller = higher MW
+
+    blue_upper = " ".join(f"{x:.1f},{yt:.1f}" for x, yt in zip(xs, ys_top))
+    blue_lower = " ".join(f"{x:.1f},{ya:.1f}" for x, ya in zip(reversed(xs), reversed(ys_act)))
+    red_upper = blue_upper
+    red_lower = " ".join(f"{x:.1f},{yb:.1f}" for x, yb in zip(reversed(xs), reversed(ys_base)))
+
+    base_pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, ys_base))
+    act_pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, ys_act))
+
+    # Panel A date ticks (~every 5 days + last day)
+    a_ticks: list[str] = []
+    tick_indices = list(range(0, len(dates_ordered), 5))
+    if (len(dates_ordered) - 1) not in tick_indices:
+        if len(dates_ordered) - 1 - tick_indices[-1] >= 3:
+            tick_indices.append(len(dates_ordered) - 1)
+        else:
+            tick_indices[-1] = len(dates_ordered) - 1
+    for di in tick_indices:
+        d = dates_ordered[di]
+        i0, i1 = date_bounds[d]
+        xt = x_slot((i0 + i1) // 2)
+        a_ticks.append(
+            f'<line x1="{xt:.1f}" y1="{a_bot}" x2="{xt:.1f}" y2="{a_bot + 4}" stroke="#94a3b8" />'
+            f'<text x="{xt:.1f}" y="{a_bot + 14}" text-anchor="middle" font-size="9" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">{d[5:]}</text>'
+        )
+
+    # Panel A key annotations (dynamically anchored to actual data points)
+    a_annots: list[str] = []
+    oct10_day_indices = [
+        i for i, s in enumerate(raw_slots)
+        if s["date"] == "2026-10-10" and s["is_inactive"] and 12 <= s["sp"] <= 36
+    ]
+    idx_oct10 = max(oct10_day_indices, key=lambda i: raw_slots[i]["gap_mw"]) if oct10_day_indices else None
+    idx_oct25 = next((i for i, s in enumerate(raw_slots) if s["date"] == "2026-10-25" and s["sp"] == 22), None)
+    idx_max_gap = max(range(n_slots), key=lambda i: raw_slots[i]["gap_mw"])
+    idx_min_gap = min(range(n_slots), key=lambda i: raw_slots[i]["gap_mw"])
+    idx_max_sev = max(range(n_slots), key=lambda i: raw_slots[i]["baseline_mw"])
+
+    if idx_oct10 is not None:
+        s10 = raw_slots[idx_oct10]
+        x10 = x_slot(idx_oct10)
+        y10_b = y_mw(s10["baseline_mw"])
+        a_annots.append(
+            f'<line x1="{x10:.1f}" y1="{a_top + 12}" x2="{x10:.1f}" y2="{y10_b:.1f}" stroke="#d97706" stroke-width="1" stroke-dasharray="2,2" />'
+            f'<circle cx="{x10:.1f}" cy="{y10_b:.1f}" r="2.6" fill="#d97706" stroke="#ffffff" stroke-width="0.8" />'
+            f'<rect x="{x10 - 52:.1f}" y="{a_top + 1}" width="104" height="13" rx="3" fill="#fffbeb" stroke="#fde68a" stroke-width="0.8" />'
+            f'<text x="{x10:.1f}" y="{a_top + 10.5}" text-anchor="middle" font-size="8.2" font-weight="600" fill="#92400e">Oct 10: +{s10["gap_mw"]:.0f} MW (wmi=0)</text>'
+        )
+
+    if idx_oct25 is not None:
+        s25 = raw_slots[idx_oct25]
+        x25 = x_slot(idx_oct25)
+        y25_b = y_mw(s25["baseline_mw"])
+        a_annots.append(
+            f'<line x1="{x25:.1f}" y1="{a_top + 12}" x2="{x25:.1f}" y2="{y25_b:.1f}" stroke="#d97706" stroke-width="1" stroke-dasharray="2,2" />'
+            f'<circle cx="{x25:.1f}" cy="{y25_b:.1f}" r="2.6" fill="#d97706" stroke="#ffffff" stroke-width="0.8" />'
+            f'<rect x="{x25 - 60:.1f}" y="{a_top + 1}" width="120" height="13" rx="3" fill="#fffbeb" stroke="#fde68a" stroke-width="0.8" />'
+            f'<text x="{x25:.1f}" y="{a_top + 10.5}" text-anchor="middle" font-size="8.2" font-weight="600" fill="#92400e">Oct 25: wmi=0 gap · 50 SPs</text>'
+        )
+
+    # Peak turn-down gap marker (Oct 31 SP 41)
+    s_mg = raw_slots[idx_max_gap]
+    x_mg = x_slot(idx_max_gap)
+    y_mg_b = y_mw(s_mg["baseline_mw"])
+    y_mg_a = y_mw(s_mg["actual_mw"])
+    a_annots.append(
+        f'<line x1="{x_mg:.1f}" y1="{y_mg_b:.1f}" x2="{x_mg:.1f}" y2="{y_mg_a:.1f}" stroke="#1d4ed8" stroke-width="1.6" />'
+        f'<circle cx="{x_mg:.1f}" cy="{y_mg_b:.1f}" r="2.5" fill="#1d4ed8" stroke="#ffffff" stroke-width="0.7" />'
+        f'<rect x="{x_mg - 95:.1f}" y="{a_top + 18}" width="92" height="13" rx="3" fill="#eff6ff" stroke="#bfdbfe" stroke-width="0.8" />'
+        f'<text x="{x_mg - 49:.1f}" y="{a_top + 27.5}" text-anchor="middle" font-size="8.2" font-weight="600" fill="#1d4ed8">Peak gap +{s_mg["gap_mw"]:.0f} MW</text>'
+    )
+
+    # Peak SEV & worst rebound markers (Nov 4)
+    s_ms = raw_slots[idx_max_sev]
+    x_ms = x_slot(idx_max_sev)
+    y_ms = y_mw(s_ms["baseline_mw"])
+    s_rb = raw_slots[idx_min_gap]
+    x_rb = x_slot(idx_min_gap)
+    y_rb = y_mw(s_rb["actual_mw"])
+    a_annots.append(
+        f'<circle cx="{x_ms:.1f}" cy="{y_ms:.1f}" r="2.6" fill="#2563eb" stroke="#ffffff" stroke-width="0.8" />'
+        f'<circle cx="{x_rb:.1f}" cy="{y_rb:.1f}" r="2.6" fill="#dc2626" stroke="#ffffff" stroke-width="0.8" />'
+        f'<rect x="{width - pad_r - 134:.1f}" y="{a_top + 1}" width="134" height="13" rx="3" fill="#fef2f2" stroke="#fecaca" stroke-width="0.8" />'
+        f'<text x="{width - pad_r - 67:.1f}" y="{a_top + 10.5}" text-anchor="middle" font-size="8.2" font-weight="600" fill="#991b1b">Nov 4: {s_ms["baseline_mw"]:.0f} SEV / {s_rb["gap_mw"]:.0f} reb</text>'
+    )
+
+    # ---- Panel B: 35 Days x 48 SPs Diverging Gap Heatmap (SEV - Actual, MW) ----
+    b_title_y = 234
+    hm_y = 250
+    n_days = len(dates_ordered)
+    cell_w = pw / 48.0
+    cell_h = 6.4
+    hm_h = n_days * cell_h  # 35 * 6.4 = 224.0 -> ends at y = 474
+
+    slot_lookup: dict[tuple[str, int], dict[str, Any]] = {
+        (s["date"], s["sp"]): s for s in raw_slots if s["sp"] <= 48
+    }
+
+    hm_cells: list[str] = []
+    hm_inact_dots: list[str] = []
+    hm_row_labels: list[str] = []
+
+    highlight_dates = {"2026-10-01", "2026-10-05", "2026-10-10", "2026-10-15", "2026-10-20", "2026-10-25", "2026-10-31", "2026-11-04"}
+    for r_idx, d in enumerate(dates_ordered):
+        ry = hm_y + r_idx * cell_h
+        is_we = dt.date.fromisoformat(d).weekday() >= 5
+        if is_we:
+            hm_row_labels.append(
+                f'<rect x="{pad_l - 4}" y="{ry + 0.5:.1f}" width="2.5" height="{cell_h - 1:.1f}" rx="1" fill="#d97706" />'
+            )
+        if d in highlight_dates:
+            lbl_col = "#b45309" if is_we else "#475569"
+            lbl_wt = "700" if d in ("2026-10-10", "2026-10-25") else "500"
+            hm_row_labels.append(
+                f'<text x="{pad_l - 7}" y="{ry + cell_h - 1.0:.1f}" text-anchor="end" font-size="8.5" font-weight="{lbl_wt}" fill="{lbl_col}" font-family="ui-monospace,SFMono-Regular,monospace">{d[5:]}</text>'
+            )
+        for sp in range(1, 49):
+            cx = pad_l + (sp - 1) * cell_w
+            rec = slot_lookup.get((d, sp))
+            if rec is None:
+                continue
+            col = _diverging_gap_color(rec["gap_mw"])
+            hm_cells.append(
+                f'<rect x="{cx:.2f}" y="{ry:.2f}" width="{cell_w + 0.2:.2f}" height="{cell_h + 0.15:.2f}" fill="{col}" />'
+            )
+            if rec["is_inactive"]:
+                hm_inact_dots.append(
+                    f'<circle cx="{cx + cell_w * 0.5:.2f}" cy="{ry + cell_h * 0.5:.2f}" r="1.45" fill="#0f172a" stroke="#ffffff" stroke-width="0.65" />'
+                )
+
+    # Off-peak SP 1-11 subtle vertical divider on heatmap
+    x_off_hm = pad_l + 11 * cell_w
+    hm_off_guide = (
+        f'<line x1="{x_off_hm:.1f}" y1="{hm_y}" x2="{x_off_hm:.1f}" y2="{hm_y + hm_h:.1f}" '
+        f'stroke="#0f172a" stroke-width="0.9" stroke-dasharray="3,2" stroke-opacity="0.55" />'
+        f'<text x="{pad_l + 5.5 * cell_w:.1f}" y="{hm_y - 4}" text-anchor="middle" font-size="8.5" font-weight="600" fill="#64748b">00:00–05:30 EV Off-Peak</text>'
+    )
+
+    # Panel B X-axis SP ticks
+    hm_xticks: list[str] = []
+    for sp_tick, lbl in [(1, "00:00"), (7, "03:00"), (12, "05:30"), (19, "09:00"), (25, "12:00"), (31, "15:00"), (37, "18:00"), (43, "21:00"), (48, "23:30")]:
+        xt = pad_l + (sp_tick - 0.5) * cell_w
+        hm_xticks.append(
+            f'<line x1="{xt:.1f}" y1="{hm_y + hm_h:.1f}" x2="{xt:.1f}" y2="{hm_y + hm_h + 3.5:.1f}" stroke="#94a3b8" />'
+            f'<text x="{xt:.1f}" y="{hm_y + hm_h + 13.5:.1f}" text-anchor="middle" font-size="9" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">{lbl}</text>'
+        )
+
+    # Diverging colorbar + legend footer (y = 502..524)
+    cb_y = hm_y + hm_h + 28
+    cb_x = pad_l + 78
+    cb_w = 136
+    cb_h = 9
+    sp_extra = [s for s in raw_slots if s["sp"] > 48]
+    sp_extra_note = (
+        f"*Oct 25 SP 49 (+{sp_extra[0]['gap_mw']:.0f} MW) &amp; SP 50 (+{sp_extra[1]['gap_mw']:.0f} MW) in Panel A"
+        if len(sp_extra) >= 2
+        else ""
+    )
+
+    return f"""
+    <div class="chart-card">
+      <div class="chart-head">
+        <div>
+          <div class="chart-title">{_esc(title)}</div>
+          <div class="chart-sub">{_esc(subtitle)}</div>
+        </div>
+        <div class="legend">
+          <span><i style="background:#0f172a"></i>Actual metered (qm)</span>
+          <span><i style="background:#2563eb"></i>Settlement baseline (sev)</span>
+          <span><i style="background:rgba(220,38,38,0.45)"></i>Rebound (qm &gt; sev)</span>
+          <span><i style="background:#d97706;width:4px"></i>Weekend</span>
+        </div>
+      </div>
+      <svg viewBox="0 0 {width} {height}" class="chart-svg" role="img" aria-label="{_esc(title)}">
+        <defs>
+          <linearGradient id="axle-gap-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#991b1b" />
+            <stop offset="16%" stop-color="#f87171" />
+            <stop offset="31%" stop-color="#f8fafc" />
+            <stop offset="65%" stop-color="#60a5fa" />
+            <stop offset="100%" stop-color="#1e3a8a" />
+          </linearGradient>
+        </defs>
+
+        <!-- Panel A: Full 35-day half-hourly series -->
+        <text x="{pad_l}" y="15" font-size="10.2" font-weight="700" fill="#1e293b">Panel A — Full 35-Day Half-Hourly Series ({n_slots:,} raw SPs, zero averaging; grey bands = weekends)</text>
+        {''.join(weekend_bands)}
+        {''.join(a_grid)}
+        <polygon fill="#2563eb" fill-opacity="0.16" points="{blue_upper} {blue_lower}" />
+        <polygon fill="#dc2626" fill-opacity="0.32" points="{red_upper} {red_lower}" />
+        <polyline fill="none" stroke="#2563eb" stroke-width="1.15" stroke-linejoin="round" points="{base_pts}" />
+        <polyline fill="none" stroke="#0f172a" stroke-width="1.0" stroke-linejoin="round" points="{act_pts}" />
+        <line x1="{pad_l}" y1="{a_bot}" x2="{width - pad_r}" y2="{a_bot}" stroke="#94a3b8" stroke-width="1" />
+        {''.join(a_ticks)}
+        {''.join(a_annots)}
+        <text x="14" y="{a_top + a_h / 2:.1f}" transform="rotate(-90 14 {a_top + a_h / 2:.1f})" text-anchor="middle" font-size="9.5" fill="#64748b">Demand (MW)</text>
+
+        <!-- Panel B: 35 Days x 48 SPs Diverging Gap Heatmap -->
+        <text x="{pad_l}" y="{b_title_y}" font-size="10.2" font-weight="700" fill="#1e293b">Panel B — 35 Days × 48 SPs Gap Heatmap (SEV − Actual, MW; amber bars = weekends)</text>
+        {hm_off_guide}
+        {''.join(hm_cells)}
+        {''.join(hm_inact_dots)}
+        <rect x="{pad_l}" y="{hm_y}" width="{pw}" height="{hm_h:.1f}" fill="none" stroke="#cbd5e1" stroke-width="0.9" />
+        {''.join(hm_row_labels)}
+        {''.join(hm_xticks)}
+        <text x="14" y="{hm_y + hm_h / 2:.1f}" transform="rotate(-90 14 {hm_y + hm_h / 2:.1f})" text-anchor="middle" font-size="9.5" fill="#64748b">Date (Oct 1 → Nov 4)</text>
+
+        <!-- Colorbar & Inactive Marker Legend -->
+        <text x="{pad_l}" y="{cb_y + 8:.1f}" font-size="8.6" font-weight="600" fill="#475569">Gap (MW):</text>
+        <text x="{cb_x - 5}" y="{cb_y + 8:.1f}" text-anchor="end" font-size="8.4" fill="#991b1b" font-family="ui-monospace,SFMono-Regular,monospace">−75</text>
+        <rect x="{cb_x}" y="{cb_y:.1f}" width="{cb_w}" height="{cb_h}" rx="2" fill="url(#axle-gap-grad)" stroke="#cbd5e1" stroke-width="0.7" />
+        <line x1="{cb_x + cb_w * 0.3125:.1f}" y1="{cb_y - 1:.1f}" x2="{cb_x + cb_w * 0.3125:.1f}" y2="{cb_y + cb_h + 1:.1f}" stroke="#64748b" stroke-width="0.9" />
+        <text x="{cb_x + cb_w * 0.3125:.1f}" y="{cb_y + cb_h + 10:.1f}" text-anchor="middle" font-size="8" fill="#64748b" font-family="ui-monospace,SFMono-Regular,monospace">0</text>
+        <text x="{cb_x + cb_w + 5}" y="{cb_y + 8:.1f}" font-size="8.4" fill="#1e3a8a" font-family="ui-monospace,SFMono-Regular,monospace">+165</text>
+
+        <circle cx="{cb_x + cb_w + 46}" cy="{cb_y + 4.5:.1f}" r="2.2" fill="#0f172a" stroke="#ffffff" stroke-width="0.8" />
+        <text x="{cb_x + cb_w + 53}" y="{cb_y + 8:.1f}" font-size="8.6" fill="#334155">Inactive SP (wmi = 0)</text>
+
+        <text x="{width - pad_r}" y="{cb_y + 8:.1f}" text-anchor="end" font-size="8.2" fill="#64748b">{sp_extra_note}</text>
+      </svg>
+      {commentary_html}
+    </div>
+    """
+
+
 def _svg_sp_overlay(
     sp_overlay: list[dict[str, Any]],
     title: str,
@@ -413,6 +818,7 @@ def build_report(start_date: str = "2026-10-01", end_date: str = "2026-11-04") -
     with get_conn() as conn:
         status = get_status(conn)
         audit_axle = compute_baseline_audit(conn, start_date, end_date, sec_party_id="AXLEENER")
+        axle_raw = _fetch_party_raw_sp_series(conn, start_date, end_date, sec_party_id="AXLEENER")
         audit_reflexi = compute_baseline_audit(conn, start_date, end_date, sec_party_id="REFLEXI")
         audit_joulen = compute_baseline_audit(conn, start_date, end_date, sec_party_id="POWONTEC")
         forensics = compute_forensics(conn, start_date, end_date)
@@ -559,22 +965,46 @@ def build_report(start_date: str = "2026-10-01", end_date: str = "2026-11-04") -
     total_regimes_rb = sum(float(r["unsettled_rebound_mwh"]) for r in market_regimes) or 1.0
     high_rb_share_pct = high_regimes_rb / total_regimes_rb * 100.0
 
-    svg_axle_sp = _svg_sp_overlay(
-        axle_d["sp_overlay"],
-        "1. Axle Energy (AXLEENER) — Frozen BL01 Baseline (~2× Actual Load)",
-        "Mean half-hourly actual metered demand (qm) vs settlement baseline (sev), 35-day average (MW). Active 35/35 days; +3.35 MW IDA pre-ramp.",
+    # Unaggregated raw-slot metrics for Axle Energy Graph 1 commentary
+    axle_slots = axle_raw["slots"]
+    axle_n_slots = len(axle_slots)
+    axle_max_gap_s = max(axle_slots, key=lambda s: s["gap_mw"])
+    axle_min_gap_s = min(axle_slots, key=lambda s: s["gap_mw"])
+    axle_max_sev_s = max(axle_slots, key=lambda s: s["baseline_mw"])
+    axle_first_act = float(axle_daily[0]["actual_demand_mwh"]) if axle_daily else 1.0
+    axle_last_act = float(axle_daily[-1]["actual_demand_mwh"]) if axle_daily else 0.0
+    axle_act_growth_pct = ((axle_last_act / max(1.0, axle_first_act)) - 1.0) * 100.0
+    axle_sev_growth_pct = ((axle_last_sev / max(1.0, axle_first_sev)) - 1.0) * 100.0
+    oct10_inact_gaps = [s["gap_mw"] for s in axle_slots if s["date"] == "2026-10-10" and s["is_inactive"] and 12 <= s["sp"] <= 36]
+    oct25_inact_gaps = [s["gap_mw"] for s in axle_slots if s["date"] == "2026-10-25" and s["is_inactive"] and 14 <= s["sp"] <= 36]
+    oct10_max_inact = max(oct10_inact_gaps, default=0.0)
+    oct25_min_inact = min(oct25_inact_gaps, default=0.0)
+    oct25_max_inact = max(oct25_inact_gaps, default=0.0)
+    sf_001 = axle_raw["subfleets"].get("001", {"n_bmus": 0, "rebound_mwh": 0.0})
+    sf_oth = axle_raw["subfleets"].get("other", {"n_bmus": 0, "rebound_mwh": 0.0})
+
+    svg_axle_sp = _svg_axle_unaggregated(
+        axle_slots,
+        "1. Axle Energy (AXLEENER) — Unaggregated 35-Day Half-Hourly Baseline vs Actual Load (1,682 SPs)",
+        f"Zero-averaging trace & 35×48 gap heatmap across all {axle_n_slots:,} raw settlement periods (Oct 1–Nov 4, incl. Oct 25 SP 49–50). Active {axle_v['active_days']}/35 days; +{axle_v.get('ida_pre_ramp_mw', 0.0):.2f} MW IDA pre-ramp.",
         commentary_html=_chart_commentary(
-            f"Axle Energy is the largest VTP in GB by settled turn-down (<strong>{_fmt_num(axle_v['settled_turndown_mwh'], 0)} MWh</strong>, "
-            f"<strong>{axle_share_pct:.1f}%</strong> of market volume across {axle_v['sbmu_count']} SBMUs) and activates on all "
-            f"{axle_v['active_days']}/35 days. Plotting its 24-hour average actual load (<code>qm</code>) against its settlement baseline "
-            f"(<code>sev</code>) tests whether P376 BL01 remains a credible counterfactual under continuous daily dispatch.",
-            f"Through the daytime (07:00–22:00), the dashed blue baseline sits at <strong>{axle_w['day_base_mean']:.1f} MW</strong> while "
-            f"actual metered demand averages just <strong>{axle_w['day_act_mean']:.1f} MW</strong> — a <strong>{axle_day_ratio:.1f}×</strong> "
-            f"daytime gap (shaded blue) that turns nearly every active half-hour into a turn-down claim. Also visible is a "
-            f"<strong>+{_fmt_num(axle_v.get('ida_pre_ramp_mw'), 2)} MW</strong> pre-event ramp ahead of peak windows (consistent with BL01 "
-            f"In-Day Adjustment). During the 00:00–05:30 EV off-peak band, actual charging surges to <strong>{axle_w['off_act_peak']:.1f} MW</strong> "
-            f"peak ({axle_w['off_act_mean']:.1f} MW mean vs {axle_w['off_base_mean']:.1f} MW baseline), creating the red-shaded unsettled rebound "
-            f"(<strong>{_fmt_num(axle_v['unsettled_rebound_mwh'], 0)} MWh</strong>, {_fmt_gbp(axle_v['implied_unsettled_comp_gbp'])} implied SSC).",
+            f"Axle Energy is GB's largest VTP by settled turn-down (<strong>{_fmt_num(axle_v['settled_turndown_mwh'], 0)} MWh</strong>, "
+            f"<strong>{axle_share_pct:.1f}%</strong> of market volume across {axle_v['sbmu_count']} SBMUs). Collapsing 35 days into a "
+            f"single 24-hour mean hides severe regime drift, sign cancellation (e.g. <strong>{axle_raw['sp10_cancel_pct']:.1f}%</strong> "
+            f"cancellation at SP 10, ranging {axle_raw['sp10_min']:+.1f} to {axle_raw['sp10_max']:+.1f} MW), and smoking-gun inactive-daytime "
+            f"gaps. Plotting every raw half-hour (Panel A) alongside the full 35×48 <code>SEV − Actual</code> heatmap with inactive "
+            f"(<code>wmi = 0</code>) markers (Panel B) preserves 100% of the empirical signal.",
+            f"Panel A reveals <strong>+{axle_act_growth_pct:.0f}%</strong> actual load growth ({axle_first_act:,.0f}→{axle_last_act:,.0f} MWh/d) "
+            f"against a stair-stepped <strong>+{axle_sev_growth_pct:.0f}%</strong> frozen SEV rise (peaking at "
+            f"<strong>{axle_max_sev_s['baseline_mw']:.1f} MW</strong> on {axle_max_sev_s['date'][5:]}), with extremes erased by averaging: "
+            f"<strong>+{axle_max_gap_s['gap_mw']:.1f} MW</strong> turn-down gap ({axle_max_gap_s['date'][5:]} SP {axle_max_gap_s['sp']}) and "
+            f"<strong>{axle_min_gap_s['gap_mw']:.1f} MW</strong> overnight rebound ({axle_min_gap_s['date'][5:]} SP {axle_min_gap_s['sp']}, <code>wmi = 0</code>). "
+            f"Panel B exposes the Oct 3+ overnight <code>wmi = 0</code> switch (black dots over deepening red SP 3–10) and two smoking-gun "
+            f"weekend daytime pauses (<strong>Oct 10</strong> up to <strong>+{oct10_max_inact:.0f} MW</strong>; <strong>Oct 25</strong> "
+            f"<strong>+{oct25_min_inact:.0f} to +{oct25_max_inact:.0f} MW</strong>) where baseline stayed ~2× actual even with <code>wmi = 0</code>. "
+            f"Even this unaggregated portfolio view is conservative on rebound: netting Axle's {sf_001['n_bmus']} <code>*001</code> SBMUs against "
+            f"its {sf_oth['n_bmus']} <code>*002/*003</code> SBMUs cancels <strong>{axle_raw['sbmu_cancel_pct']:.1f}%</strong> "
+            f"({_fmt_num(axle_raw['sbmu_cancel_mwh'], 0)} MWh) of SBMU-level rebound.",
         ),
     )
     svg_reflexi_sp = _svg_sp_overlay(
@@ -994,6 +1424,7 @@ def build_report(start_date: str = "2026-10-01", end_date: str = "2026-11-04") -
     .hero {{ border-radius: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
     h2 {{ break-after: avoid; page-break-after: avoid; }}
     .kpi-strip, .chart-card, .table-wrap, .policy-box, .section-intro, .table-note {{ break-inside: avoid; }}
+    .chart-commentary {{ grid-template-columns: 1fr 1.35fr; gap: 12px; }}
     .table-wrap {{ overflow: visible; }}
     table {{ font-size: 9.5px; }}
     th, td {{ padding: 6px 6px; }}
@@ -1063,7 +1494,7 @@ def build_report(start_date: str = "2026-10-01", end_date: str = "2026-11-04") -
       to the underlying mathematical mechanism and its market-wide economic impact:
     </p>
     <ul class="guide-list">
-      <li><strong>Charts 1–3 (Portfolio Archetypes):</strong> Compare three contrasting VTPs on the same 24-hour actual-load (<code>qm</code>) vs settlement-baseline (<code>sev</code>) scale — isolating frozen daytime BL01 inflation (Axle Energy), un-notified overnight EV rebound (REFLEXI), and quantised self-nominated SEVs (Joulen).</li>
+      <li><strong>Charts 1–3 (Portfolio Archetypes):</strong> Chart 1 retains every raw half-hour (1,682 SPs, zero averaging) and a 35×48 gap heatmap for Axle Energy to expose frozen daytime BL01 drift, overnight rebound, and inactive-daytime gaps; Charts 2–3 contrast REFLEXI (un-notified overnight EV rebound) and Joulen (quantised self-nominated SEVs) on a 24-hour <code>qm</code> vs <code>sev</code> scale.</li>
       <li><strong>Chart 4 (Mechanism):</strong> Zooms out to a 35-day daily series for Axle Energy to show <em>how</em> P376's event-day exclusion rule mathematically locks baselines above actual load.</li>
       <li><strong>Chart 5 (Incentive Test):</strong> Tests the "free option" hypothesis statistically by comparing baseline error distributions on notified (<code>wmi &gt; 0</code>) versus un-notified (<code>wmi = 0</code>) Settlement Periods.</li>
       <li><strong>Chart 6 (Wholesale Impact):</strong> Aggregates all active VTPs by System Buy Price (<code>SBP</code>) regime to test whether dispatch aligns with genuine system scarcity relative to Supplier Sourcing Cost (<code>SSC</code>).</li>
