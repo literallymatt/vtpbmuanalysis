@@ -26,6 +26,7 @@ A standalone, self-contained executive policy report with embedded inline SVG ch
 
 - **[reports/vtp_baseline_bl01_audit_report.html](reports/vtp_baseline_bl01_audit_report.html)** (open in any browser; regenerated via `uv run python scripts/generate_report.py`)
 - **[reports/vtp_baseline_bl01_audit_report.pdf](reports/vtp_baseline_bl01_audit_report.pdf)** (PDF rendering of the same report)
+- **[reports/drax_supplier_compensation_vtp.md](reports/drax_supplier_compensation_vtp.md)** — All-time (`2024-11-07` – `2026-11-18`, 738 settled days) P415 supplier compensation cashflow (`sccp`/`scvp`) and implied turn-down vs turn-up volume analysis for Drax Energy Solutions (`HAVEN`), backed by [reports/drax_haven_daily_sccp.csv](reports/drax_haven_daily_sccp.csv) and [scripts/pull_drax_supplier_compensation.py](scripts/pull_drax_supplier_compensation.py).
 
 ## Empirical Snapshot (35 Settled Days: `2026-10-01` – `2026-11-04`)
 
